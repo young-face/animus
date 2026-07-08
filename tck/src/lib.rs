@@ -1,13 +1,15 @@
+use std::error::Error;
+
 use api::{KeyValueRow, KeyValueSelectionDirectives, KeyValueSelector, Reader};
 use futures::StreamExt;
 use futures::pin_mut;
 
-async fn ensure_read_existing_row(
+pub async fn ensure_read_existing_row<E: Error>(
     reader: impl Reader<
         Subject = KeyValueRow,
         SelectionDirectives = KeyValueSelectionDirectives,
         Selector = KeyValueSelector,
-        Error = (),
+        Error = E,
     >,
 ) {
     let kv1 = KeyValueRow::new("test-namespace", "test-name", "test-key", "test-value");

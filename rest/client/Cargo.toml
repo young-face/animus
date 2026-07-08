@@ -1,0 +1,15 @@
+[package]
+name = "animus-rest-client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+api = {workspace = true}
+
+futures = {workspace = true}
+thiserror = {workspace = true}
+http = {workspace = true}
+tokio = {workspace = true}
+
+[dev-dependencies]
+tck = {workspace = true}

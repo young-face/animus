@@ -1,11 +1,12 @@
 [workspace]
 resolver = "3"
-members = ["api", "tck"]
+members = ["api", "rest/client", "tck"]
 
 [workspace.dependencies]
 
 # Internal
 api = {package = "animus-api", path = "api"}
+tck = {package = "animus-tck", path = "tck"}
 
 # External
 tokio = { version = "1.52.3", features = ["full", "tracing"]}
@@ -13,3 +14,5 @@ console-subscriber = { version = "0.5.0"}
 tracing = { version = "0.1.44"}
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"]}
 futures = {version = "0.3.32"}
+thiserror = {version = "2.0.18"}
+http = {version = "1.4.2"}
