@@ -6,7 +6,7 @@ pub trait Reader {
     type Selector;
     type Error;
 
-    fn read<S>(&self, seleciton: S) -> impl Stream<Item = Result<Self::Subject, Self::Error>>
+    fn read<S>(&self, selection: S) -> impl Stream<Item = Result<Self::Subject, Self::Error>>
     where
         S: FnOnce(Self::SelectionDirectives) -> Self::Selector;
 }

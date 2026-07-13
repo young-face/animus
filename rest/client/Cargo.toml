@@ -8,8 +8,9 @@ api = {workspace = true}
 
 futures = {workspace = true}
 thiserror = {workspace = true}
-http = {workspace = true}
-tokio = {workspace = true}
+tokio = {workspace = true, features = ["net", "macros"]}
+tokio-util = {workspace=true, features = ["rt"]}
+reqwest = {workspace = true, features = ["query"]}
 
 [dev-dependencies]
 tck = {workspace = true}

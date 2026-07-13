@@ -1,4 +1,4 @@
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct KeyValueRow {
     pub namespace: String,
     pub name: String,
@@ -17,6 +17,7 @@ impl KeyValueRow {
     }
 }
 
+#[derive(Default)]
 pub struct KeyValueSelectionDirectives {
     pub namespace: Option<String>,
     pub name: Option<String>,
@@ -50,6 +51,7 @@ impl KeyValueSelectionDirectives {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct KeyValueSelector {
     pub namespace: Option<String>,
     pub name: Option<String>,
