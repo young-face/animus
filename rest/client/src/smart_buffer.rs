@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use tokio::sync::{
-    Notify,
     mpsc::{self, Receiver, Sender},
+    Notify,
 };
 use tokio_util::task::AbortOnDropHandle;
 
@@ -49,12 +49,14 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::sync::{Arc, atomic::AtomicUsize};
+    use std::sync::{atomic::AtomicUsize, Arc};
 
     use tokio::sync::mpsc::Sender;
 
     use crate::smart_buffer::SmartBuffer;
 
+    /// This test ensures that SmartBuffer iterates through all elements
+    /// provided by refill function.
     #[tokio::test]
     async fn iterate_all_elements() {
         let expected = vec![1, 2, 3, 4];
@@ -74,6 +76,7 @@ mod test {
         assert_eq!(actual, expected)
     }
 
+    /// This test ensures that SmartBuffer calls refill function lazily.
     #[tokio::test]
     async fn refill_on_demand() {
         let counter = Arc::new(AtomicUsize::new(0));
