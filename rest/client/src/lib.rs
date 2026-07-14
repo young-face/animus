@@ -2,11 +2,14 @@ mod query_builder;
 mod smart_buffer;
 
 use api::{KeyValueRow, KeyValueSelectionDirectives, KeyValueSelector, Reader};
-use futures::{stream::unfold, Stream};
+use csv_async::AsyncDeserializer;
+use futures::{stream::unfold, Stream, StreamExt, TryStreamExt};
+use http::StatusCode;
 use reqwest::Client;
 use serde::Deserialize;
 use thiserror::Error;
 use tokio::sync::mpsc::{error::SendError, Sender};
+use tokio_util::io::StreamReader;
 
 use crate::{query_builder::QueryBuilder, smart_buffer::SmartBuffer};
 
@@ -64,19 +67,35 @@ impl Reader for RestKeyValueReader {
                     .get(repository_uri.to_owned())
                     .query(&query)
                     .build()?;
-                let response = client.execute(request).await;
+                let response = client.execute(request).await?;
+                let status = response.status();
 
-                match response {
-                    Ok(_) => {
-                        todo!();
-                        break;
+                if !status.is_success() {
+                    if let Some(permit) = permits.next() {
+                        permit.send(Err(RestKeyValueReaderError::UnexpectedStatus(status)));
                     }
-                    Err(e) => {
-                        if let Some(permit) = permits.next() {
-                            permit.send(Err(RestKeyValueReaderError::RequestError(e)));
-                            break;
-                        }
+                    break;
+                }
+
+                let stream = response
+                    .bytes_stream()
+                    .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err));
+                let stream_reader = StreamReader::new(stream);
+                let mut deserializer = AsyncDeserializer::from_reader(stream_reader);
+                let mut records = deserializer.deserialize::<CsvRow>();
+                let mut counter = 0;
+
+                while let Some(record) = records.next().await {
+                    let csv_row = record?;
+                    let key_value_row: KeyValueRow = csv_row.into();
+                    if let Some(permit) = permits.next() {
+                        permit.send(Ok(key_value_row));
                     }
+                    counter += 1;
+                }
+
+                if counter < batch_size {
+                    break;
                 }
             }
 
@@ -92,6 +111,10 @@ impl Reader for RestKeyValueReader {
 
 #[derive(Error, Debug)]
 pub enum RestKeyValueReaderError {
+    #[error("Error while parsing response")]
+    ParseError(#[from] csv_async::Error),
+    #[error("Unexpected status {0}")]
+    UnexpectedStatus(StatusCode),
     #[error("Request error {0}")]
     RequestError(#[from] reqwest::Error),
     #[error("Failed to send value {0}")]
@@ -106,6 +129,12 @@ struct CsvRow {
     name: String,
     key: String,
     value: String,
+}
+
+impl Into<KeyValueRow> for CsvRow {
+    fn into(self) -> KeyValueRow {
+        KeyValueRow::new(&self.namespace, &self.name, &self.key, &self.value)
+    }
 }
 
 #[cfg(test)]
