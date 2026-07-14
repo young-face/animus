@@ -1,10 +1,11 @@
-use std::sync::Arc;
+use std::{error::Error, sync::Arc};
 
 use tokio::sync::{
     mpsc::{self, Receiver, Sender},
     Notify,
 };
 use tokio_util::task::AbortOnDropHandle;
+use tracing::error;
 
 pub struct SmartBuffer<T>
 where
@@ -19,10 +20,11 @@ impl<T> SmartBuffer<T>
 where
     T: Send + 'static,
 {
-    pub fn new<F, Fut>(size: usize, refill: F) -> Self
+    pub fn new<F, Fut, E>(size: usize, refill: F) -> Self
     where
         F: (FnOnce(Sender<T>) -> Fut) + Send + 'static,
-        Fut: Future + Send + 'static,
+        Fut: Future<Output = Result<(), E>> + Send + 'static,
+        E: Error,
     {
         let (sender, receiver) = mpsc::channel(size);
         let start_refill = Arc::new(Notify::new());
@@ -30,7 +32,9 @@ where
         let start_refill_clone = start_refill.clone();
         let handle = tokio::spawn(async move {
             start_refill_clone.notified().await;
-            refill(sender).await;
+            if let Err(e) = refill(sender).await {
+                error!("Refill faied: {}", e);
+            };
         });
 
         let refill_task = AbortOnDropHandle::new(handle);
@@ -65,6 +69,7 @@ mod test {
             for el in elements {
                 let _ = sender.send(el).await;
             }
+            Result::<(), std::convert::Infallible>::Ok(())
         };
         let mut buffer = SmartBuffer::new(2, refill_fn);
 
@@ -85,6 +90,7 @@ mod test {
         let mut buffer = SmartBuffer::new(1, move |sender: Sender<()>| async move {
             counter_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let _ = sender.send(()).await;
+            Result::<(), std::convert::Infallible>::Ok(())
         });
         assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 0);
 
