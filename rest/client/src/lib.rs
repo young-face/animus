@@ -1,4 +1,3 @@
-mod query_builder;
 mod smart_buffer;
 
 use api::{KeyValueRow, KeyValueSelectionDirectives, KeyValueSelector, Reader};
@@ -6,12 +5,12 @@ use csv_async::AsyncDeserializer;
 use futures::{stream::unfold, Stream, StreamExt, TryStreamExt};
 use http::StatusCode;
 use reqwest::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use smart_buffer::SmartBuffer;
 use thiserror::Error;
-use tokio::sync::mpsc::{error::SendError, Sender};
+use tokio::sync::mpsc::Sender;
 use tokio_util::io::StreamReader;
-
-use crate::{query_builder::QueryBuilder, smart_buffer::SmartBuffer};
+use tracing::debug;
 
 pub struct RestKeyValueReader {
     client: Client,
@@ -21,7 +20,11 @@ pub struct RestKeyValueReader {
 
 impl RestKeyValueReader {
     pub fn new(repository_uri: &str, batch_size: usize) -> Self {
-        todo!()
+        Self {
+            client: Client::new(),
+            repository_uri: repository_uri.to_owned(),
+            batch_size,
+        }
     }
 }
 
@@ -37,6 +40,7 @@ impl Reader for RestKeyValueReader {
     {
         let selection_directives = KeyValueSelectionDirectives::default();
         let selector = selection(selection_directives);
+
         let repository_uri = self.repository_uri.clone();
         let batch_size = self.batch_size;
         let client = self.client.clone();
@@ -47,80 +51,103 @@ impl Reader for RestKeyValueReader {
 
             loop {
                 // Wait until batch fits in buffer
-                let mut permits = sender.reserve_many(batch_size).await?;
+                let reserve = sender.reserve_many(batch_size).await;
+                let Ok(mut permits) = reserve else {
+                    debug!("Cannot reserve permits");
+                    break;
+                };
+
+                // Send with permit or without it
+                let mut send = async |it: Entry| match permits.next() {
+                    Some(permit) => permit.send(it),
+                    None => {
+                        let send_result = sender.send(it).await;
+                        if let Err(err) = send_result {
+                            debug!("Channel is closed {}", err);
+                        };
+                    }
+                };
 
                 // Build a query
                 let query = match &cursor {
-                    Some(last) => QueryBuilder::new()
+                    Some(last) => Query::new()
                         .selector(&selector)
                         .size(batch_size)
-                        .last(&last)
-                        .build(),
-                    None => QueryBuilder::new()
-                        .selector(&selector)
-                        .size(batch_size)
-                        .build(),
+                        .last(&last),
+                    None => Query::new().selector(&selector).size(batch_size),
                 };
 
-                // Perform request
-                let request = client
+                // Fetch the next batch
+                let response = client
                     .get(repository_uri.to_owned())
                     .query(&query)
-                    .build()?;
-                let response = client.execute(request).await?;
-                let status = response.status();
+                    .send()
+                    .await?;
 
+                // Handle non-success statuses
+                let status = response.status();
                 if !status.is_success() {
-                    if let Some(permit) = permits.next() {
-                        permit.send(Err(RestKeyValueReaderError::UnexpectedStatus(status)));
-                    }
+                    send(Err(RestKeyValueReaderError::UnexpectedStatus(status))).await;
                     break;
                 }
 
-                let stream = response
-                    .bytes_stream()
-                    .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err));
+                // Setup CSV deserializer
+                let error_mapping = |err| std::io::Error::new(std::io::ErrorKind::Other, err);
+                let stream = response.bytes_stream().map_err(error_mapping);
                 let stream_reader = StreamReader::new(stream);
                 let mut deserializer = AsyncDeserializer::from_reader(stream_reader);
                 let mut records = deserializer.deserialize::<CsvRow>();
-                let mut counter = 0;
 
+                // Read and send everything
+                let mut counter = 0;
                 while let Some(record) = records.next().await {
-                    let csv_row = record?;
-                    let key_value_row: KeyValueRow = csv_row.into();
-                    if let Some(permit) = permits.next() {
-                        permit.send(Ok(key_value_row));
-                    }
+                    let entry: Entry = match record {
+                        Ok(csv_row) => Ok(csv_row.into()),
+                        Err(err) => Err(err.into()),
+                    };
+                    send(entry).await;
                     counter += 1;
                 }
 
-                if counter < batch_size {
+                // Break if it was the last batch
+                let last_batch = counter < batch_size;
+                if last_batch {
                     break;
                 }
             }
 
             Result::<(), RestKeyValueReaderError>::Ok(())
         };
-        let initial_state = SmartBuffer::new(self.batch_size, refill_fn);
 
+        let initial_state = SmartBuffer::new(self.batch_size, refill_fn);
         unfold(initial_state, |mut state| async {
             state.next().await.map(|it| (it, state))
         })
     }
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum RestKeyValueReaderError {
-    #[error("Error while parsing response")]
-    ParseError(#[from] csv_async::Error),
+    #[error("Error while reading response: {0}")]
+    ReadError(String),
     #[error("Unexpected status {0}")]
     UnexpectedStatus(StatusCode),
     #[error("Request error {0}")]
-    RequestError(#[from] reqwest::Error),
-    #[error("Failed to send value {0}")]
-    SendError(#[from] SendError<()>),
+    RequestError(String),
     #[error("Unknown error while reading key-values")]
     Unknown,
+}
+
+impl From<csv_async::Error> for RestKeyValueReaderError {
+    fn from(value: csv_async::Error) -> Self {
+        Self::ReadError(value.to_string())
+    }
+}
+
+impl From<reqwest::Error> for RestKeyValueReaderError {
+    fn from(value: reqwest::Error) -> Self {
+        Self::RequestError(value.to_string())
+    }
 }
 
 #[derive(Debug, Deserialize, Eq, PartialEq)]
@@ -137,15 +164,80 @@ impl Into<KeyValueRow> for CsvRow {
     }
 }
 
+#[derive(Default, Serialize)]
+pub struct Query {
+    namespace: Option<String>,
+    name: Option<String>,
+    key: Option<String>,
+    value: Option<String>,
+    last_namespace: Option<String>,
+    last_name: Option<String>,
+    last_key: Option<String>,
+    size: Option<usize>,
+}
+
+impl Query {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn selector(mut self, selector: &KeyValueSelector) -> Self {
+        self.namespace = selector.namespace.to_owned();
+        self.name = selector.name.to_owned();
+        self.key = selector.key.to_owned();
+        self.value = selector.value.to_owned();
+        self
+    }
+
+    pub fn last(mut self, kvr: &KeyValueRow) -> Self {
+        self.last_namespace = Some(kvr.namespace.to_owned());
+        self.last_name = Some(kvr.name.to_owned());
+        self.last_key = Some(kvr.key.to_owned());
+        self
+    }
+
+    pub fn size(mut self, size: usize) -> Self {
+        self.size = Some(size);
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use tck::ensure_read_existing_row;
+    use httpmock::MockServer;
 
     use super::*;
 
     #[tokio::test]
     async fn read_existing_kv() {
-        let reader = RestKeyValueReader::new("http://localhost:8080", 10);
-        ensure_read_existing_row(reader).await;
+        let expected = vec![Ok(KeyValueRow::new(
+            "test-namespace",
+            "test-name",
+            "test-key",
+            "test-value",
+        ))];
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method("GET")
+                .path("/")
+                .query_param("namespace", "test-namespace")
+                .query_param("name", "test-name")
+                .query_param("key", "test-key")
+                .query_param("size", "10");
+            then.status(200)
+                .header("content-type", "application/csv; charset=UTF-8")
+                .body("namespace,name,key,value\ntest-namespace,test-name,test-key,test-value");
+        });
+
+        let reader = RestKeyValueReader::new(&server.base_url(), 10);
+        let stream = reader.read(|it| {
+            it.namespace("test-namespace")
+                .name("test-name")
+                .key("test-key")
+                .build()
+        });
+        let actual: Vec<_> = stream.collect().await;
+        assert_eq!(actual, expected);
+        mock.assert();
     }
 }

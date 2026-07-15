@@ -6,15 +6,21 @@ edition = "2024"
 [dependencies]
 api = { workspace = true }
 
+bytes = { workspace = true }
 csv-async = { workspace = true, features = ["tokio"] }
 futures = { workspace = true }
 http = { workspace = true }
 reqwest = { workspace = true, features = ["query", "stream"] }
-serde = { workspace = true, features = ["derive"] }
+serde = {
+  workspace = true,
+  features = [
+    "derive",
+  ]
+}
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "net"] }
 tokio-util = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }
 
 [dev-dependencies]
-tck = { workspace = true }
+httpmock = { workspace = true }
