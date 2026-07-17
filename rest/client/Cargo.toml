@@ -21,6 +21,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "net"] }
 tokio-util = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }
+tracing-test = { workspace = true }
 
 [dev-dependencies]
 httpmock = { workspace = true }

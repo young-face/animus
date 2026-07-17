@@ -10,7 +10,7 @@ use smart_buffer::SmartBuffer;
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
 use tokio_util::io::StreamReader;
-use tracing::debug;
+use tracing::{debug, trace};
 
 pub struct RestKeyValueReader {
     client: Client,
@@ -82,7 +82,10 @@ impl Reader for RestKeyValueReader {
                     .get(repository_uri.to_owned())
                     .query(&query)
                     .build()?;
+                trace!("Read batch {:?}", request);
+
                 let response = client.execute(request).await?;
+                debug!("Received {:?}", response);
 
                 // Handle non-success statuses
                 let status = response.status();
@@ -104,6 +107,8 @@ impl Reader for RestKeyValueReader {
                     let entry: Entry = match record {
                         Ok(csv_row) => {
                             let kv: KeyValueRow = csv_row.into();
+                            trace!("Read row {:?}", kv);
+
                             cursor = Some(kv.clone());
                             Ok(kv)
                         }
@@ -209,6 +214,7 @@ impl Query {
 #[cfg(test)]
 mod tests {
     use httpmock::MockServer;
+    use tracing_test::traced_test;
 
     use super::*;
 
@@ -217,6 +223,7 @@ mod tests {
     const ROBOTS_PAGE_3: &str = include_str!("../tests/fixtures/robots_half_page.csv");
 
     #[tokio::test]
+    #[traced_test]
     async fn read_all_pages() {
         let server = MockServer::start();
         let page_1 = server.mock(|when, then| {
@@ -284,5 +291,10 @@ mod tests {
         page_1.assert();
         page_2.assert();
         page_3.assert();
+    }
+
+    #[tokio::test]
+    async fn fetch_in_single_page() {
+        todo!()
     }
 }
