@@ -1,0 +1,6 @@
+namespace,name,key,value
+robots,T-1000,sensory_equipment[0],Omni-directional_visual_spectrum
+robots,T-1000,sensory_equipment[1],Acoustic_analysis
+robots,T-1000,sensory_equipment[2],Thermal_tracking
+robots,T-1000,shape_shifting.human_mimicry.enabled,true
+robots,T-1000,shape_shifting.human_mimicry.features[0],Replicate any human biometry

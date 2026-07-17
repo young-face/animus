@@ -1,0 +1,6 @@
+namespace,name,key,value
+robots,T-1000,classification,Infiltration and Assasination Unit
+robots,T-1000,estimated_mass,140
+robots,T-1000,physical_specs.composition,Liquid Metal
+robots,T-1000,physical_specs.structural_state,"Amorphous, semi-solid"
+robots,T-1000,power_source,Unknown Internal Hydraulic Cell

@@ -47,7 +47,7 @@ impl Reader for RestKeyValueReader {
 
         type Entry = Result<KeyValueRow, RestKeyValueReaderError>;
         let refill_fn = move |sender: Sender<Entry>| async move {
-            let cursor = Option::<KeyValueRow>::None;
+            let mut cursor = Option::<KeyValueRow>::None;
 
             loop {
                 // Wait until batch fits in buffer
@@ -78,12 +78,11 @@ impl Reader for RestKeyValueReader {
                 };
 
                 // Fetch the next batch
-                let response = client
+                let request = client
                     .get(repository_uri.to_owned())
                     .query(&query)
-                    .send()
-                    .await?;
-
+                    .build()?;
+                let response = client.execute(request).await?;
                 // Handle non-success statuses
                 let status = response.status();
                 if !status.is_success() {
@@ -102,7 +101,11 @@ impl Reader for RestKeyValueReader {
                 let mut counter = 0;
                 while let Some(record) = records.next().await {
                     let entry: Entry = match record {
-                        Ok(csv_row) => Ok(csv_row.into()),
+                        Ok(csv_row) => {
+                            let kv: KeyValueRow = csv_row.into();
+                            cursor = Some(kv.clone());
+                            Ok(kv)
+                        }
                         Err(err) => Err(err.into()),
                     };
                     send(entry).await;
@@ -208,36 +211,77 @@ mod tests {
 
     use super::*;
 
+    const ROBOTS_PAGE_1: &str = include_str!("../tests/fixtures/robots_full_page_1.csv");
+    const ROBOTS_PAGE_2: &str = include_str!("../tests/fixtures/robots_full_page_2.csv");
+    const ROBOTS_PAGE_3: &str = include_str!("../tests/fixtures/robots_half_page.csv");
+
     #[tokio::test]
-    async fn read_existing_kv() {
-        let expected = vec![Ok(KeyValueRow::new(
-            "test-namespace",
-            "test-name",
-            "test-key",
-            "test-value",
-        ))];
+    async fn read_all_pages() {
         let server = MockServer::start();
-        let mock = server.mock(|when, then| {
+        let page_1 = server.mock(|when, then| {
             when.method("GET")
                 .path("/")
-                .query_param("namespace", "test-namespace")
-                .query_param("name", "test-name")
-                .query_param("key", "test-key")
-                .query_param("size", "10");
+                .query_param("namespace", "robots")
+                .query_param("name", "T-1000")
+                .query_param("size", "5")
+                .query_param_missing("last_namespace")
+                .query_param_missing("last_name")
+                .query_param_missing("last_key");
             then.status(200)
                 .header("content-type", "application/csv; charset=UTF-8")
-                .body("namespace,name,key,value\ntest-namespace,test-name,test-key,test-value");
+                .body(ROBOTS_PAGE_1);
+        });
+        let page_2 = server.mock(|when, then| {
+            when.method("GET")
+                .path("/")
+                .query_param("namespace", "robots")
+                .query_param("name", "T-1000")
+                .query_param("last_namespace", "robots")
+                .query_param("last_name", "T-1000")
+                .query_param("last_key", "power_source")
+                .query_param("size", "5");
+            then.status(200)
+                .header("content-type", "application/csv; charset=UTF-8")
+                .body(ROBOTS_PAGE_2);
+        });
+        let page_3 = server.mock(|when, then| {
+            when.method("GET")
+                .path("/")
+                .query_param("namespace", "robots")
+                .query_param("name", "T-1000")
+                .query_param("last_namespace", "robots")
+                .query_param("last_name", "T-1000")
+                .query_param("last_key", "shape_shifting.human_mimicry.features[0]")
+                .query_param("size", "5");
+            then.status(200)
+                .header("content-type", "application/csv; charset=UTF-8")
+                .body(ROBOTS_PAGE_3);
         });
 
-        let reader = RestKeyValueReader::new(&server.base_url(), 10);
-        let stream = reader.read(|it| {
-            it.namespace("test-namespace")
-                .name("test-name")
-                .key("test-key")
-                .build()
-        });
+        #[rustfmt::skip]
+        let expected = vec![
+            Ok(KeyValueRow::new("robots","T-1000","classification","Infiltration and Assasination Unit")),
+            Ok(KeyValueRow::new("robots","T-1000","estimated_mass","140")),
+            Ok(KeyValueRow::new("robots","T-1000","physical_specs.composition","Liquid Metal")),
+            Ok(KeyValueRow::new("robots","T-1000","physical_specs.structural_state","Amorphous, semi-solid")),
+            Ok(KeyValueRow::new("robots","T-1000","power_source","Unknown Internal Hydraulic Cell")),
+            Ok(KeyValueRow::new("robots","T-1000","sensory_equipment[0]","Omni-directional_visual_spectrum")),
+            Ok(KeyValueRow::new("robots","T-1000","sensory_equipment[1]","Acoustic_analysis")),
+            Ok(KeyValueRow::new("robots","T-1000","sensory_equipment[2]","Thermal_tracking")),
+            Ok(KeyValueRow::new("robots","T-1000","shape_shifting.human_mimicry.enabled","true")),
+            Ok(KeyValueRow::new("robots","T-1000","shape_shifting.human_mimicry.features[0]","Replicate any human biometry")),
+            Ok(KeyValueRow::new("robots","T-1000","shape_shifting.human_mimicry.features[1]","Mimic clothing and textures")),
+            Ok(KeyValueRow::new("robots","T-1000","shape_shifting.human_mimicry.features[2]","Voice print simulation")),
+            Ok(KeyValueRow::new("robots","T-1000","status","Experimental Phase 1")),
+        ];
+
+        let reader = RestKeyValueReader::new(&server.base_url(), 5);
+        let stream = reader.read(|it| it.namespace("robots").name("T-1000").build());
         let actual: Vec<_> = stream.collect().await;
+
         assert_eq!(actual, expected);
-        mock.assert();
+        page_1.assert();
+        page_2.assert();
+        page_3.assert();
     }
 }
