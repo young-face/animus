@@ -83,6 +83,7 @@ impl Reader for RestKeyValueReader {
                     .query(&query)
                     .build()?;
                 let response = client.execute(request).await?;
+
                 // Handle non-success statuses
                 let status = response.status();
                 if !status.is_success() {
