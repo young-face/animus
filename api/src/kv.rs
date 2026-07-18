@@ -22,6 +22,21 @@ impl KeyValueRow {
     }
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct KeyValueRowIdentity {
+    pub namespace: String,
+    pub name: String,
+    pub key: String,
+}
+
+pub struct KeyValueCreateDirectives {}
+
+pub struct KeyValueCreateCommand {}
+
+pub struct KeyValueUpdateDirectives {}
+
+pub struct KeyValueUpdateCommand {}
+
 /// Directives those define which rows should be selected.
 #[derive(Default)]
 pub struct KeyValueSelectionDirectives {
