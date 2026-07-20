@@ -2,7 +2,10 @@ mod smart_buffer;
 
 use api::{KeyValueRow, KeyValueSelectionDirectives, KeyValueSelector, Reader};
 use csv_async::AsyncDeserializer;
-use futures::{stream::unfold, Stream, StreamExt, TryStreamExt};
+use futures::{
+    stream::{unfold, BoxStream},
+    StreamExt, TryStreamExt,
+};
 use http::StatusCode;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -34,7 +37,10 @@ impl Reader for RestKeyValueReader {
     type Selector = KeyValueSelector;
     type Error = RestKeyValueReaderError;
 
-    fn read<S>(&self, selection: S) -> impl Stream<Item = Result<Self::Subject, Self::Error>>
+    fn read<S>(
+        &self,
+        selection: S,
+    ) -> BoxStream<'static, Result<KeyValueRow, RestKeyValueReaderError>>
     where
         S: FnOnce(Self::SelectionDirectives) -> Self::Selector,
     {
@@ -129,9 +135,9 @@ impl Reader for RestKeyValueReader {
         };
 
         let initial_state = SmartBuffer::new(self.batch_size, refill_fn);
-        unfold(initial_state, |mut state| async {
+        Box::pin(unfold(initial_state, |mut state| async {
             state.next().await.map(|it| (it, state))
-        })
+        }))
     }
 }
 

@@ -1,3 +1,7 @@
+use std::error::Error;
+
+use crate::{Delete, Reader, Update, Upsert, Writer};
+
 /// The main key-value abstraction.
 #[derive(Debug, PartialEq, Clone)]
 pub struct KeyValueRow {
@@ -29,9 +33,41 @@ pub struct KeyValueRowIdentity {
     pub key: String,
 }
 
-pub struct KeyValueCreateDirectives {}
+impl KeyValueRowIdentity {
+    pub fn new(namespace: &str, name: &str, key: &str) -> Self {
+        KeyValueRowIdentity {
+            namespace: namespace.to_owned(),
+            name: name.to_owned(),
+            key: key.to_owned(),
+        }
+    }
+}
 
-pub struct KeyValueCreateCommand {}
+pub struct KeyValueCreateDirectives;
+
+impl KeyValueCreateDirectives {
+    pub fn with_fields(
+        self,
+        namespace: &str,
+        name: &str,
+        key: &str,
+        value: &str,
+    ) -> KeyValueCreateCommand {
+        KeyValueCreateCommand {
+            namespace: namespace.to_owned(),
+            name: name.to_owned(),
+            key: key.to_owned(),
+            value: value.to_owned(),
+        }
+    }
+}
+
+pub struct KeyValueCreateCommand {
+    pub namespace: String,
+    pub name: String,
+    pub key: String,
+    pub value: String,
+}
 
 pub struct KeyValueUpdateDirectives {}
 
@@ -83,4 +119,31 @@ pub struct KeyValueSelector {
     pub name: Option<String>,
     pub key: Option<String>,
     pub value: Option<String>,
+}
+
+pub trait KeyValueReader<E: Error>:
+    Reader<
+    Subject = KeyValueRow,
+    SelectionDirectives = KeyValueSelectionDirectives,
+    Selector = KeyValueSelector,
+    Error = E,
+>
+{
+}
+
+pub trait KeyValueWriter<'a, E: Error>:
+    Writer<Identity = KeyValueRowIdentity, Capabilities = &'a mut dyn KeyValueCapabilities, Error = E>
+{
+}
+
+pub trait KeyValueCapabilities:
+    Upsert<KeyValueCreateDirectives, KeyValueCreateCommand>
+    + Update<
+        KeyValueRow,
+        KeyValueSelectionDirectives,
+        KeyValueSelector,
+        KeyValueUpdateDirectives,
+        KeyValueUpdateCommand,
+    > + Delete<KeyValueSelectionDirectives, KeyValueSelector>
+{
 }
