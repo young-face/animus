@@ -131,8 +131,12 @@ pub trait KeyValueReader<E: Error>:
 {
 }
 
-pub trait KeyValueWriter<'a, E: Error>:
-    Writer<Identity = KeyValueRowIdentity, Capabilities = &'a mut dyn KeyValueCapabilities, Error = E>
+pub trait KeyValueWriter<E: Error>:
+    Writer<
+    Identity = KeyValueRowIdentity,
+    Capabilities = &'static mut dyn KeyValueCapabilities,
+    Error = E,
+>
 {
 }
 
@@ -145,5 +149,17 @@ pub trait KeyValueCapabilities:
         KeyValueUpdateDirectives,
         KeyValueUpdateCommand,
     > + Delete<KeyValueSelectionDirectives, KeyValueSelector>
+{
+}
+
+impl<T> KeyValueCapabilities for T where
+    T: Upsert<KeyValueCreateDirectives, KeyValueCreateCommand>
+        + Update<
+            KeyValueRow,
+            KeyValueSelectionDirectives,
+            KeyValueSelector,
+            KeyValueUpdateDirectives,
+            KeyValueUpdateCommand,
+        > + Delete<KeyValueSelectionDirectives, KeyValueSelector>
 {
 }

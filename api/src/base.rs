@@ -37,7 +37,7 @@ pub trait Writer {
 }
 
 pub trait Upsert<CreateDirectives, CreateCommand> {
-    fn create(
+    fn upsert(
         &mut self,
         block: &dyn FnMut(CreateDirectives) -> CreateCommand,
     ) -> Pin<Box<dyn Future<Output = ()>>>;

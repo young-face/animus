@@ -6,7 +6,7 @@ use futures::StreamExt;
 
 pub async fn ensure_compatible<ReaderError: Error + PartialEq, WriterError: Error + PartialEq>(
     reader: impl KeyValueReader<ReaderError>,
-    writer: impl KeyValueWriter<'static, WriterError>,
+    writer: impl KeyValueWriter<WriterError>,
 ) {
     let existing_rows = vec![KeyValueRow::new(
         "robots",
@@ -15,7 +15,7 @@ pub async fn ensure_compatible<ReaderError: Error + PartialEq, WriterError: Erro
         "Infiltration and Assasination Unit",
     )];
 
-    let write_stream = writer.write(create_all(existing_rows.clone())).await;
+    let write_stream = writer.write(upsert_all(existing_rows.clone())).await;
     let write_results: Vec<Result<KeyValueRowIdentity, WriterError>> = write_stream.collect().await;
     let expected_write_results = vec![Ok(KeyValueRowIdentity::new(
         "robots",
@@ -33,10 +33,10 @@ pub async fn ensure_compatible<ReaderError: Error + PartialEq, WriterError: Erro
     assert_eq!(read_results, expected_read_results);
 }
 
-fn create_all(rows: Vec<KeyValueRow>) -> impl AsyncFnOnce(&mut dyn KeyValueCapabilities) {
+fn upsert_all(rows: Vec<KeyValueRow>) -> impl AsyncFnOnce(&mut dyn KeyValueCapabilities) {
     async |tx| {
         for row in rows {
-            tx.create(&|kv| kv.with_fields(&row.namespace, &row.name, &row.key, &row.value))
+            tx.upsert(&|kv| kv.with_fields(&row.namespace, &row.name, &row.key, &row.value))
                 .await;
         }
     }
