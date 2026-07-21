@@ -1,7 +1,3 @@
-use std::error::Error;
-
-use crate::{Delete, Reader, Update, Upsert, Writer};
-
 /// The main key-value abstraction.
 #[derive(Debug, PartialEq, Clone)]
 pub struct KeyValueRow {
@@ -43,17 +39,17 @@ impl KeyValueRowIdentity {
     }
 }
 
-pub struct KeyValueCreateDirectives;
+pub struct KeyValueUpsertDirectives;
 
-impl KeyValueCreateDirectives {
+impl KeyValueUpsertDirectives {
     pub fn with_fields(
         self,
         namespace: &str,
         name: &str,
         key: &str,
         value: &str,
-    ) -> KeyValueCreateCommand {
-        KeyValueCreateCommand {
+    ) -> KeyValueUpsertCommand {
+        KeyValueUpsertCommand {
             namespace: namespace.to_owned(),
             name: name.to_owned(),
             key: key.to_owned(),
@@ -62,7 +58,7 @@ impl KeyValueCreateDirectives {
     }
 }
 
-pub struct KeyValueCreateCommand {
+pub struct KeyValueUpsertCommand {
     pub namespace: String,
     pub name: String,
     pub key: String,
@@ -119,47 +115,4 @@ pub struct KeyValueSelector {
     pub name: Option<String>,
     pub key: Option<String>,
     pub value: Option<String>,
-}
-
-pub trait KeyValueReader<E: Error>:
-    Reader<
-    Subject = KeyValueRow,
-    SelectionDirectives = KeyValueSelectionDirectives,
-    Selector = KeyValueSelector,
-    Error = E,
->
-{
-}
-
-pub trait KeyValueWriter<E: Error>:
-    Writer<
-    Identity = KeyValueRowIdentity,
-    Capabilities = &'static mut dyn KeyValueCapabilities,
-    Error = E,
->
-{
-}
-
-pub trait KeyValueCapabilities:
-    Upsert<KeyValueCreateDirectives, KeyValueCreateCommand>
-    + Update<
-        KeyValueRow,
-        KeyValueSelectionDirectives,
-        KeyValueSelector,
-        KeyValueUpdateDirectives,
-        KeyValueUpdateCommand,
-    > + Delete<KeyValueSelectionDirectives, KeyValueSelector>
-{
-}
-
-impl<T> KeyValueCapabilities for T where
-    T: Upsert<KeyValueCreateDirectives, KeyValueCreateCommand>
-        + Update<
-            KeyValueRow,
-            KeyValueSelectionDirectives,
-            KeyValueSelector,
-            KeyValueUpdateDirectives,
-            KeyValueUpdateCommand,
-        > + Delete<KeyValueSelectionDirectives, KeyValueSelector>
-{
 }

@@ -15,7 +15,7 @@ pub async fn ensure_compatible<ReaderError: Error + PartialEq, WriterError: Erro
         "Infiltration and Assasination Unit",
     )];
 
-    let write_stream = writer.write(upsert_all(existing_rows.clone())).await;
+    let write_stream = writer.write(upserting_all(existing_rows.clone())).await;
     let write_results: Vec<Result<KeyValueRowIdentity, WriterError>> = write_stream.collect().await;
     let expected_write_results = vec![Ok(KeyValueRowIdentity::new(
         "robots",
@@ -33,11 +33,14 @@ pub async fn ensure_compatible<ReaderError: Error + PartialEq, WriterError: Erro
     assert_eq!(read_results, expected_read_results);
 }
 
-fn upsert_all(rows: Vec<KeyValueRow>) -> impl AsyncFnOnce(&mut dyn KeyValueCapabilities) {
+fn upserting_all(
+    subj: impl IntoIterator<Item = KeyValueRow>,
+) -> impl AsyncFnOnce(Box<dyn KeyValueCapabilities>) {
     async |tx| {
-        for row in rows {
+        let iter = subj.into_iter();
+        for row in iter {
             tx.upsert(&|kv| kv.with_fields(&row.namespace, &row.name, &row.key, &row.value))
-                .await;
+                .await
         }
     }
 }

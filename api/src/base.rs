@@ -1,4 +1,4 @@
-use std::pin::Pin;
+use std::{error::Error, pin::Pin};
 
 use futures::stream::BoxStream;
 
@@ -23,34 +23,17 @@ pub trait Reader {
         S: FnOnce(Self::SelectionDirectives) -> Self::Selector;
 }
 
-pub trait Writer {
-    type Identity;
-    type Capabilities;
-    type Error;
+pub trait Upserter {
+    type Ctx;
 
-    fn write<B>(
-        &self,
-        block: B,
-    ) -> Pin<Box<dyn Future<Output = BoxStream<'static, Result<Self::Identity, Self::Error>>> + Send>>
+    async fn upsert<B>(&self, block: B)
     where
-        B: AsyncFnOnce(Self::Capabilities);
+        B: AsyncFnOnce(Self::Ctx) -> Self::Ctx;
 }
 
-pub trait Upsert<CreateDirectives, CreateCommand> {
+pub trait UpsertCtx<UpsertDirectives, UpsertCommand, UpsertError> {
     fn upsert(
-        &mut self,
-        block: &dyn FnMut(CreateDirectives) -> CreateCommand,
-    ) -> Pin<Box<dyn Future<Output = ()>>>;
-}
-
-pub trait Update<Subject, SelectionDirectives, Selector, UpdateDirectives, UpdateCommand> {
-    fn update(
-        &mut self,
-        selection: &dyn FnOnce(SelectionDirectives) -> Selector,
-        block: &dyn FnMut(&Subject, UpdateDirectives) -> UpdateCommand,
-    );
-}
-
-pub trait Delete<SelectionDirectives, Selector> {
-    fn delete(&mut self, selection: &dyn FnOnce(SelectionDirectives) -> Selector);
+        &self,
+        block: &dyn Fn(UpsertDirectives) -> UpsertCommand,
+    ) -> Pin<Box<dyn Future<Output = Result<(), UpsertError>>>>;
 }

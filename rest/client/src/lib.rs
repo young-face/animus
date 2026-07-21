@@ -1,6 +1,6 @@
 mod reader;
 mod smart_buffer;
-mod writer;
+mod upserter;
 
 pub use reader::*;
-pub use writer::*;
+pub use upserter::*;
