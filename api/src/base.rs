@@ -1,4 +1,4 @@
-use std::{error::Error, pin::Pin};
+use std::pin::Pin;
 
 use futures::stream::BoxStream;
 
@@ -23,17 +23,27 @@ pub trait Reader {
         S: FnOnce(Self::SelectionDirectives) -> Self::Selector;
 }
 
-pub trait Upserter {
-    type Ctx;
-
-    async fn upsert<B>(&self, block: B)
+/// Common abstraction for transactional scenarios.
+pub trait InTransaction<Tx> {
+    /// Run `block` transactionally. It requires `block` to return transaction
+    /// after use. It guarantees that we could perform any async finalization on
+    /// the transaction.
+    async fn tx<B>(&self, block: B)
     where
-        B: AsyncFnOnce(Self::Ctx) -> Self::Ctx;
+        B: AsyncFnOnce(Tx) -> Tx;
 }
 
-pub trait UpsertCtx<UpsertDirectives, UpsertCommand, UpsertError> {
+/// Common `upsert` abstraction. Upsert in this context means insert or update.
+/// `Directives` define customization capabilities for upsert process.
+/// `Termination` is a type-safe termination operator that signals than
+/// customisation was completed. `E` is an error occured while upsert.
+pub trait Upsert<Directives, Termination, E> {
+    /// Customizeble upsert. It can be customized with `Directives`. The
+    /// signature requires `block` to return termination operator. It's useful
+    /// in case we want to ensure that `block` has actually performed some
+    /// required customizations.
     fn upsert(
         &self,
-        block: &dyn Fn(UpsertDirectives) -> UpsertCommand,
-    ) -> Pin<Box<dyn Future<Output = Result<(), UpsertError>>>>;
+        block: &dyn Fn(Directives) -> Termination,
+    ) -> Pin<Box<dyn Future<Output = Result<(), E>>>>;
 }

@@ -7,11 +7,12 @@ pub struct KeyValueRow {
     pub name: String,
     /// Specifies object property.
     pub key: String,
-    /// Value of that property.
+    /// Value of the property.
     pub value: String,
 }
 
 impl KeyValueRow {
+    /// Create key-value.
     pub fn new(namespace: &str, name: &str, key: &str, value: &str) -> Self {
         KeyValueRow {
             namespace: namespace.to_owned(),
@@ -22,26 +23,15 @@ impl KeyValueRow {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
-pub struct KeyValueRowIdentity {
-    pub namespace: String,
-    pub name: String,
-    pub key: String,
-}
-
-impl KeyValueRowIdentity {
-    pub fn new(namespace: &str, name: &str, key: &str) -> Self {
-        KeyValueRowIdentity {
-            namespace: namespace.to_owned(),
-            name: name.to_owned(),
-            key: key.to_owned(),
-        }
-    }
-}
-
+/// Capabilities for building upsert command.
 pub struct KeyValueUpsertDirectives;
 
 impl KeyValueUpsertDirectives {
+    /// Finish building upsert command passing required fields.
+    /// `namespace` – can be used for specifying object class, file path, namespace and so on.
+    /// `name` – unique name in the namespace. It can be used as object id or file name.
+    /// `key` – specify object property.
+    /// `value` – value of the property.
     pub fn with_fields(
         self,
         namespace: &str,
@@ -58,16 +48,13 @@ impl KeyValueUpsertDirectives {
     }
 }
 
+/// Upsert command.
 pub struct KeyValueUpsertCommand {
     pub namespace: String,
     pub name: String,
     pub key: String,
     pub value: String,
 }
-
-pub struct KeyValueUpdateDirectives {}
-
-pub struct KeyValueUpdateCommand {}
 
 /// Directives those define which rows should be selected.
 #[derive(Default)]

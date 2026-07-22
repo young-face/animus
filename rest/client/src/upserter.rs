@@ -1,8 +1,8 @@
 use std::{pin::Pin, sync::Arc};
 
-use api::{KeyValueUpsertCommand, KeyValueUpsertDirectives, UpsertCtx, Upserter};
+use api::{InTransaction, KeyValueUpsertCommand, KeyValueUpsertDirectives, Upsert};
 use bytes::Bytes;
-use csv_async::{AsyncSerializer, AsyncWriter};
+use csv_async::AsyncSerializer;
 use futures::TryStreamExt;
 use reqwest::{Body, Client};
 use serde::Serialize;
@@ -13,7 +13,7 @@ use tokio::{
 };
 use tokio_util::io::ReaderStream;
 
-struct RestKeyValueUpserter {
+pub struct RestKeyValueUpserter {
     client: Client,
     uri: String,
 }
@@ -27,12 +27,10 @@ impl RestKeyValueUpserter {
     }
 }
 
-impl Upserter for RestKeyValueUpserter {
-    type Ctx = Box<RestKeyValueUpsertCtx>;
-
-    async fn upsert<B>(&self, block: B)
+impl InTransaction<Box<RestKeyValueUpsert>> for RestKeyValueUpserter {
+    async fn tx<B>(&self, block: B)
     where
-        B: AsyncFnOnce(Self::Ctx) -> Self::Ctx,
+        B: AsyncFnOnce(Box<RestKeyValueUpsert>) -> Box<RestKeyValueUpsert>,
     {
         let (writer, reader) = duplex(64 * 1024);
 
@@ -46,7 +44,7 @@ impl Upserter for RestKeyValueUpserter {
         });
 
         let csv_writer = AsyncSerializer::from_writer(writer);
-        let ctx = RestKeyValueUpsertCtx::new(csv_writer);
+        let ctx = RestKeyValueUpsert::new(csv_writer);
         let returned_ctx = block(Box::new(ctx)).await;
         returned_ctx.flush().await;
         drop(returned_ctx);
@@ -54,11 +52,11 @@ impl Upserter for RestKeyValueUpserter {
     }
 }
 
-struct RestKeyValueUpsertCtx {
+pub struct RestKeyValueUpsert {
     sink: Arc<Mutex<AsyncSerializer<DuplexStream>>>,
 }
 
-impl RestKeyValueUpsertCtx {
+impl RestKeyValueUpsert {
     fn new(sink: AsyncSerializer<DuplexStream>) -> Self {
         Self {
             sink: Arc::new(Mutex::new(sink)),
@@ -68,11 +66,12 @@ impl RestKeyValueUpsertCtx {
     async fn flush(&self) {
         let mut sink = self.sink.lock().await;
         let _ = sink.flush().await;
+        todo!("Handle flush error");
     }
 }
 
-impl UpsertCtx<KeyValueUpsertDirectives, KeyValueUpsertCommand, RestKeyValueUpsertError>
-    for RestKeyValueUpsertCtx
+impl Upsert<KeyValueUpsertDirectives, KeyValueUpsertCommand, RestKeyValueUpsertError>
+    for RestKeyValueUpsert
 {
     fn upsert(
         &self,
@@ -123,7 +122,7 @@ pub enum RestKeyValueUpsertError {
 #[cfg(test)]
 mod tests {
 
-    use api::{KeyValueRow, UpsertCtx};
+    use api::{KeyValueRow, Upsert};
     use httpmock::MockServer;
 
     use super::*;
@@ -146,20 +145,18 @@ mod tests {
             "classification",
             "Infiltration and Assasination Unit",
         );
-        upserter.upsert(upserting_one(expected)).await;
+        upserter.tx(upserting_one(expected)).await;
         mock.assert();
     }
 
     fn upserting_one(
         row: KeyValueRow,
-    ) -> impl AsyncFnOnce(Box<RestKeyValueUpsertCtx>) -> Box<RestKeyValueUpsertCtx> {
+    ) -> impl AsyncFnOnce(Box<RestKeyValueUpsert>) -> Box<RestKeyValueUpsert> {
         let row = row.clone();
-        async move |tx: Box<RestKeyValueUpsertCtx>| {
-            tx.upsert(&|it: KeyValueUpsertDirectives| {
-                it.with_fields(&row.namespace, &row.name, &row.key, &row.value)
-            })
-            .await
-            .expect("Failed to upsert row");
+        async move |tx| {
+            tx.upsert(&|it| it.with_fields(&row.namespace, &row.name, &row.key, &row.value))
+                .await
+                .expect("Failed to upsert row");
             tx
         }
     }
