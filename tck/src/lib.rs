@@ -1,4 +1,4 @@
-use std::error::Error;
+use std::{error::Error, fmt::Debug};
 
 use api::{
     InTransaction, KeyValueRow, KeyValueSelectionDirectives, KeyValueSelector,
@@ -6,7 +6,11 @@ use api::{
 };
 use futures::StreamExt;
 
-pub async fn ensure_compatible<ReaderError: Error + PartialEq, UpsertError: Error + PartialEq>(
+pub async fn ensure_compatible<
+    ReaderError: Error + PartialEq + Debug,
+    UpsertTxError: Error + PartialEq + Debug,
+    UpsertError: Error + PartialEq + Debug,
+>(
     reader: impl Reader<
         Subject = KeyValueRow,
         SelectionDirectives = KeyValueSelectionDirectives,
@@ -15,6 +19,7 @@ pub async fn ensure_compatible<ReaderError: Error + PartialEq, UpsertError: Erro
     >,
     upserter: impl InTransaction<
         Box<dyn Upsert<KeyValueUpsertDirectives, KeyValueUpsertCommand, UpsertError>>,
+        UpsertTxError,
     >,
 ) {
     let existing_rows = vec![KeyValueRow::new(
@@ -37,7 +42,7 @@ pub async fn ensure_compatible<ReaderError: Error + PartialEq, UpsertError: Erro
     );
 }
 
-fn upserting_all<E>(
+fn upserting_all<E: Error + Debug>(
     subj: impl IntoIterator<Item = KeyValueRow>,
 ) -> impl AsyncFnOnce(
     Box<dyn Upsert<KeyValueUpsertDirectives, KeyValueUpsertCommand, E>>,
@@ -46,7 +51,8 @@ fn upserting_all<E>(
         let iter = subj.into_iter();
         for row in iter {
             tx.upsert(&|kv| kv.with_fields(&row.namespace, &row.name, &row.key, &row.value))
-                .await;
+                .await
+                .expect("Error while upserting all");
         }
         tx
     }

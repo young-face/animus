@@ -1,14 +1,15 @@
-use std::{pin::Pin, sync::Arc};
+use std::{fmt::Error, pin::Pin, sync::Arc};
 
 use api::{InTransaction, KeyValueUpsertCommand, KeyValueUpsertDirectives, Upsert};
 use bytes::Bytes;
 use csv_async::AsyncSerializer;
 use futures::TryStreamExt;
+use http::status::StatusCode;
 use reqwest::{Body, Client};
 use serde::Serialize;
 use thiserror::Error;
 use tokio::{
-    io::{duplex, DuplexStream},
+    io::{self, duplex, DuplexStream},
     sync::Mutex,
 };
 use tokio_util::io::ReaderStream;
@@ -16,39 +17,72 @@ use tokio_util::io::ReaderStream;
 pub struct RestKeyValueUpserter {
     client: Client,
     uri: String,
+    buffer_size_in_bytes: usize,
 }
 
 impl RestKeyValueUpserter {
-    pub fn new(uri: &str) -> Self {
+    pub fn new(uri: &str, buffer_size_in_bytes: usize) -> Self {
         Self {
             client: Client::new(),
             uri: uri.to_owned(),
+            buffer_size_in_bytes,
         }
     }
 }
 
-impl InTransaction<Box<RestKeyValueUpsert>> for RestKeyValueUpserter {
-    async fn tx<B>(&self, block: B)
+impl InTransaction<Box<RestKeyValueUpsert>, Result<(), RestKeyValueUpsertTxError>>
+    for RestKeyValueUpserter
+{
+    async fn tx<B>(&self, block: B) -> Result<(), RestKeyValueUpsertTxError>
     where
         B: AsyncFnOnce(Box<RestKeyValueUpsert>) -> Box<RestKeyValueUpsert>,
     {
-        let (writer, reader) = duplex(64 * 1024);
+        let (writer, reader) = duplex(self.buffer_size_in_bytes);
 
+        // Run background upserting task
         let client = self.client.clone();
         let uri = self.uri.clone();
-        let writer_join_handle = tokio::spawn(async move {
+        let upsert_task = tokio::spawn(async move {
             let byte_stream = ReaderStream::new(reader).map_ok(|chunk| Bytes::from(chunk));
             let body = Body::wrap_stream(byte_stream);
-            let response = client.post(uri).body(body).send().await;
-            todo!("handle response");
+            client.post(uri).body(body).send().await
         });
 
+        // Wait while `block` is writing
         let csv_writer = AsyncSerializer::from_writer(writer);
-        let ctx = RestKeyValueUpsert::new(csv_writer);
-        let returned_ctx = block(Box::new(ctx)).await;
-        returned_ctx.flush().await;
-        drop(returned_ctx);
-        writer_join_handle.await;
+        let tx = Box::new(RestKeyValueUpsert::new(csv_writer));
+        let tx = block(tx).await;
+
+        // Flush buffer after write
+        let _ = tx
+            .flush()
+            .await
+            .map_err(|err| RestKeyValueUpsertTxError::SendingError(err.to_string()));
+
+        // Close channel by dropping writer
+        drop(tx);
+
+        // Wait for response
+        let response = upsert_task
+            .await
+            .map_err(|err| RestKeyValueUpsertTxError::SendingInterrupted(err.to_string()))?
+            .map_err(|err| RestKeyValueUpsertTxError::SendingError(err.to_string()))?;
+
+        // Read response body
+        let status = response.status();
+        let response_body = response
+            .text()
+            .await
+            .map_err(|err| RestKeyValueUpsertTxError::ResponseReadError(err.to_string()))?;
+
+        // Map response
+        match status {
+            StatusCode::OK => Ok(()),
+            _ => Err(RestKeyValueUpsertTxError::UnexpectedStatus(
+                status,
+                response_body,
+            )),
+        }
     }
 }
 
@@ -63,10 +97,9 @@ impl RestKeyValueUpsert {
         }
     }
 
-    async fn flush(&self) {
+    async fn flush(&self) -> io::Result<()> {
         let mut sink = self.sink.lock().await;
-        let _ = sink.flush().await;
-        todo!("Handle flush error");
+        sink.flush().await
     }
 }
 
@@ -83,11 +116,9 @@ impl Upsert<KeyValueUpsertDirectives, KeyValueUpsertCommand, RestKeyValueUpsertE
         Box::pin(async move {
             let mut sink = sink.lock().await;
             let row: CsvRow = command.into();
-            if let Err(err) = sink.serialize(row).await {
-                return Err(RestKeyValueUpsertError::SerializationError(err.to_string()));
-            }
-
-            Ok(())
+            sink.serialize(row)
+                .await
+                .map_err(|err| RestKeyValueUpsertError::UnexpectedError(err.to_string()))
         })
     }
 }
@@ -112,11 +143,21 @@ impl From<KeyValueUpsertCommand> for CsvRow {
 }
 
 #[derive(Error, Debug, PartialEq)]
-pub enum RestKeyValueUpsertError {
-    #[error("Error while serialization: {0}")]
-    SerializationError(String),
-    #[error("Unknown error while upseerting key-values")]
-    Unknown,
+pub enum RestKeyValueUpsertTxError {
+    #[error("Response read error: {0}")]
+    ResponseReadError(String),
+    #[error("Unexpected status code {0}: {1}")]
+    UnexpectedStatus(StatusCode, String),
+    #[error("Sending was interrupted: {0}")]
+    SendingInterrupted(String),
+    #[error("Send error {0}")]
+    SendingError(String),
+}
+
+#[derive(Error, Debug, PartialEq)]
+enum RestKeyValueUpsertError {
+    #[error("Unexpected error: {0}")]
+    UnexpectedError(String),
 }
 
 #[cfg(test)]
@@ -138,14 +179,17 @@ mod tests {
             then.status(200);
         });
 
-        let upserter = RestKeyValueUpserter::new(&server.base_url());
+        let upserter = RestKeyValueUpserter::new(&server.base_url(), 64 * 1024);
         let expected = KeyValueRow::new(
             "robots",
             "T-1000",
             "classification",
             "Infiltration and Assasination Unit",
         );
-        upserter.tx(upserting_one(expected)).await;
+        upserter
+            .tx(upserting_one(expected))
+            .await
+            .expect("Upsert error");
         mock.assert();
     }
 
@@ -156,7 +200,7 @@ mod tests {
         async move |tx| {
             tx.upsert(&|it| it.with_fields(&row.namespace, &row.name, &row.key, &row.value))
                 .await
-                .expect("Failed to upsert row");
+                .expect("Error while upserting one");
             tx
         }
     }
