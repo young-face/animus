@@ -57,7 +57,7 @@ impl InTransaction<Box<RestKeyValueUpsert>, Result<(), RestKeyValueUpsertTxError
         let _ = tx
             .flush()
             .await
-            .map_err(|err| RestKeyValueUpsertTxError::SendingError(err.to_string()));
+            .map_err(|err| RestKeyValueUpsertTxError::SendingError(err.to_string()))?;
 
         // Close channel by dropping writer
         drop(tx);
