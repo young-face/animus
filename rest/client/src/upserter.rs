@@ -1,12 +1,12 @@
-use std::{fmt::Error, pin::Pin, sync::Arc};
+use std::{pin::Pin, sync::Arc};
 
-use api::{InTransaction, KeyValueUpsertCommand, KeyValueUpsertDirectives, Upsert};
+use api::{InTransaction, KeyValueRow, Upsert};
 use bytes::Bytes;
 use csv_async::AsyncSerializer;
 use futures::TryStreamExt;
 use http::status::StatusCode;
 use reqwest::{Body, Client};
-use serde::Serialize;
+use rest_common::CsvKeyValueRow;
 use thiserror::Error;
 use tokio::{
     io::{self, duplex, DuplexStream},
@@ -103,42 +103,20 @@ impl RestKeyValueUpsert {
     }
 }
 
-impl Upsert<KeyValueUpsertDirectives, KeyValueUpsertCommand, RestKeyValueUpsertError>
-    for RestKeyValueUpsert
-{
+impl Upsert<(), KeyValueRow, RestKeyValueUpsertError> for RestKeyValueUpsert {
     fn upsert(
         &self,
-        block: &dyn Fn(KeyValueUpsertDirectives) -> KeyValueUpsertCommand,
+        block: &dyn Fn(()) -> KeyValueRow,
     ) -> Pin<Box<dyn Future<Output = Result<(), RestKeyValueUpsertError>>>> {
-        let directives = KeyValueUpsertDirectives;
-        let command = block(directives);
+        let command = block(());
         let sink = self.sink.clone();
         Box::pin(async move {
             let mut sink = sink.lock().await;
-            let row: CsvRow = command.into();
+            let row: CsvKeyValueRow = command.into();
             sink.serialize(row)
                 .await
                 .map_err(|err| RestKeyValueUpsertError::UnexpectedError(err.to_string()))
         })
-    }
-}
-
-#[derive(Debug, Serialize)]
-struct CsvRow {
-    namespace: String,
-    name: String,
-    key: String,
-    value: String,
-}
-
-impl From<KeyValueUpsertCommand> for CsvRow {
-    fn from(value: KeyValueUpsertCommand) -> Self {
-        Self {
-            namespace: value.namespace.clone(),
-            name: value.name.clone(),
-            key: value.key.clone(),
-            value: value.value.clone(),
-        }
     }
 }
 
@@ -198,7 +176,7 @@ mod tests {
     ) -> impl AsyncFnOnce(Box<RestKeyValueUpsert>) -> Box<RestKeyValueUpsert> {
         let row = row.clone();
         async move |tx| {
-            tx.upsert(&|it| it.with_fields(&row.namespace, &row.name, &row.key, &row.value))
+            tx.upsert(&|_| KeyValueRow::new(&row.namespace, &row.name, &row.key, &row.value))
                 .await
                 .expect("Error while upserting one");
             tx

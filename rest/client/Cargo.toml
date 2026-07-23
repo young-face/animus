@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 api = { workspace = true }
+rest-common = { workspace = true }
 
 bytes = { workspace = true }
 csv-async = { workspace = true, features = ["tokio"] }

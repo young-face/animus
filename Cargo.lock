@@ -23,6 +23,7 @@ name = "animus-rest-client"
 version = "0.1.0"
 dependencies = [
  "animus-api",
+ "animus-rest-common",
  "bytes",
  "csv-async",
  "futures",
@@ -35,6 +36,14 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-test",
+]
+
+[[package]]
+name = "animus-rest-common"
+version = "0.1.0"
+dependencies = [
+ "animus-api",
+ "serde",
 ]
 
 [[package]]

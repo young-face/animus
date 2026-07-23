@@ -6,7 +6,8 @@ use futures::{
 };
 use http::StatusCode;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use rest_common::CsvKeyValueRow;
+use serde::Serialize;
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
 use tokio_util::io::StreamReader;
@@ -104,7 +105,7 @@ impl Reader for RestKeyValueReader {
                 let stream = response.bytes_stream().map_err(error_mapping);
                 let stream_reader = StreamReader::new(stream);
                 let mut deserializer = AsyncDeserializer::from_reader(stream_reader);
-                let mut records = deserializer.deserialize::<CsvRow>();
+                let mut records = deserializer.deserialize::<CsvKeyValueRow>();
 
                 // Read and send everything
                 let mut counter = 0;
@@ -162,20 +163,6 @@ impl From<csv_async::Error> for RestKeyValueReaderError {
 impl From<reqwest::Error> for RestKeyValueReaderError {
     fn from(value: reqwest::Error) -> Self {
         Self::RequestError(value.to_string())
-    }
-}
-
-#[derive(Debug, Deserialize, Eq, PartialEq)]
-struct CsvRow {
-    namespace: String,
-    name: String,
-    key: String,
-    value: String,
-}
-
-impl Into<KeyValueRow> for CsvRow {
-    fn into(self) -> KeyValueRow {
-        KeyValueRow::new(&self.namespace, &self.name, &self.key, &self.value)
     }
 }
 

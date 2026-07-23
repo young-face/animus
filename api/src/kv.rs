@@ -23,39 +23,6 @@ impl KeyValueRow {
     }
 }
 
-/// Capabilities for building upsert command.
-pub struct KeyValueUpsertDirectives;
-
-impl KeyValueUpsertDirectives {
-    /// Finish building upsert command passing required fields.
-    /// `namespace` – can be used for specifying object class, file path, namespace and so on.
-    /// `name` – unique name in the namespace. It can be used as object id or file name.
-    /// `key` – specify object property.
-    /// `value` – value of the property.
-    pub fn with_fields(
-        self,
-        namespace: &str,
-        name: &str,
-        key: &str,
-        value: &str,
-    ) -> KeyValueUpsertCommand {
-        KeyValueUpsertCommand {
-            namespace: namespace.to_owned(),
-            name: name.to_owned(),
-            key: key.to_owned(),
-            value: value.to_owned(),
-        }
-    }
-}
-
-/// Upsert command.
-pub struct KeyValueUpsertCommand {
-    pub namespace: String,
-    pub name: String,
-    pub key: String,
-    pub value: String,
-}
-
 /// Directives those define which rows should be selected.
 #[derive(Default)]
 pub struct KeyValueSelectionDirectives {
