@@ -62,7 +62,7 @@ impl InTransaction<Box<RestKeyValueUpsert>, Result<(), RestKeyValueUpsertTxError
         // Close channel by dropping writer
         drop(tx);
 
-        // Wait for response
+        // Wait for the response
         let response = upsert_task
             .await
             .map_err(|err| RestKeyValueUpsertTxError::SendingInterrupted(err.to_string()))?
@@ -112,7 +112,7 @@ impl Upsert<(), KeyValueRow, RestKeyValueUpsertError> for RestKeyValueUpsert {
         let sink = self.sink.clone();
         Box::pin(async move {
             let mut sink = sink.lock().await;
-            let row: CsvKeyValueRow = command.into();
+            let row: CsvKeyValueRow = (&command).into();
             sink.serialize(row)
                 .await
                 .map_err(|err| RestKeyValueUpsertError::UnexpectedError(err.to_string()))

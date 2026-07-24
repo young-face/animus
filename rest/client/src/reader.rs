@@ -1,106 +1,111 @@
+use std::sync::Arc;
+
 use api::{KeyValueRow, KeyValueSelectionDirectives, KeyValueSelector, Reader};
 use csv_async::AsyncDeserializer;
-use futures::{
-    stream::{unfold, BoxStream},
-    StreamExt, TryStreamExt,
-};
+use futures::{prelude::stream::BoxStream, stream::unfold, StreamExt, TryStreamExt};
 use http::StatusCode;
 use reqwest::Client;
-use rest_common::CsvKeyValueRow;
-use serde::Serialize;
+use rest_common::{CsvKeyValueRow, Cursor, Query};
 use thiserror::Error;
-use tokio::sync::mpsc::Sender;
-use tokio_util::io::StreamReader;
-use tracing::{debug, trace};
-
-use crate::smart_buffer::SmartBuffer;
+use tokio::sync::{
+    mpsc::{self, Receiver},
+    Notify,
+};
+use tokio_util::{io::StreamReader, task::AbortOnDropHandle};
+use tracing::debug;
 
 pub struct RestKeyValueReader {
     client: Client,
-    repository_uri: String,
-    batch_size: usize,
+    uri: String,
+    page_size: usize,
 }
 
-impl RestKeyValueReader {
-    pub fn new(repository_uri: &str, batch_size: usize) -> Self {
-        Self {
-            client: Client::new(),
-            repository_uri: repository_uri.to_owned(),
-            batch_size,
-        }
-    }
-}
-
+/// This implementation of `Reader` reads the data page-by-page and converts
+/// it into a continuous async stream of rows.
+///
+/// The main features of the implementation are:
+/// - Using a cursor instead of the offset.
+/// - Load the first page on demand, when the first element is requested by
+///   a caller.
+/// - Load the next page when the previous one has been consumed.
 impl Reader for RestKeyValueReader {
     type Subject = KeyValueRow;
     type SelectionDirectives = KeyValueSelectionDirectives;
     type Selector = KeyValueSelector;
     type Error = RestKeyValueReaderError;
 
-    fn read<S>(
-        &self,
-        selection: S,
-    ) -> BoxStream<'static, Result<KeyValueRow, RestKeyValueReaderError>>
+    fn read<S>(&self, selection: S) -> BoxStream<'static, Result<Self::Subject, Self::Error>>
     where
         S: FnOnce(Self::SelectionDirectives) -> Self::Selector,
     {
-        let selection_directives = KeyValueSelectionDirectives::default();
-        let selector = selection(selection_directives);
+        // Build the selector
+        let directives = KeyValueSelectionDirectives::default();
+        let selector = selection(directives);
 
-        let repository_uri = self.repository_uri.clone();
-        let batch_size = self.batch_size;
+        // Set up a latch that signals reader start reading
+        let start_latch = Arc::new(Notify::new());
+        let start_latch_clone = start_latch.clone();
+
+        // The fact that the buffer is the same size as the page
+        // makes this implementation not optimal for unbounded result sets.
+        let page_size = self.page_size;
+        let (sender, receiver) = mpsc::channel::<KeyValueRow>(page_size);
+
+        // Run background reading task
         let client = self.client.clone();
+        let uri = self.uri.clone();
+        let read_task = tokio::spawn(async move {
+            // Wait until client has requested the first element
+            start_latch_clone.notified().await;
 
-        type Entry = Result<KeyValueRow, RestKeyValueReaderError>;
-        let refill_fn = move |sender: Sender<Entry>| async move {
-            let mut cursor = Option::<KeyValueRow>::None;
-
+            let mut cursor = Option::<Cursor>::None;
             loop {
-                // Wait until batch fits in buffer
-                let reserve = sender.reserve_many(batch_size).await;
-                let Ok(mut permits) = reserve else {
-                    debug!("Cannot reserve permits");
-                    break;
-                };
+                // Wait until page fits in buffer
 
-                // Send with permit or without it
-                let mut send = async |it: Entry| match permits.next() {
-                    Some(permit) => permit.send(it),
-                    None => {
-                        let send_result = sender.send(it).await;
-                        if let Err(err) = send_result {
-                            debug!("Channel is closed {}", err);
-                        };
+                // *This implementation will only work when we read page-by-page.
+                // For unbounded result sets a different strategy should be applied.
+                let reserve = sender.reserve_many(page_size).await;
+                let mut permits = match reserve {
+                    Ok(it) => it,
+                    Err(err) => {
+                        debug!("Read interrupted: {:?}", err);
+                        break;
                     }
                 };
 
                 // Build a query
                 let query = match &cursor {
-                    Some(last) => Query::new()
+                    Some(cursor) => Query::new()
                         .selector(&selector)
-                        .size(batch_size)
-                        .last(&last),
-                    None => Query::new().selector(&selector).size(batch_size),
+                        .size(page_size)
+                        .cursor(&cursor),
+                    None => Query::new().selector(&selector).size(page_size),
                 };
 
-                // Fetch the next batch
-                let request = client
-                    .get(repository_uri.to_owned())
-                    .query(&query)
-                    .build()?;
-                trace!("Read batch {:?}", request);
+                // Perform the request
+                let request = client.get(&uri).query(&query).build().map_err(|err| {
+                    RestKeyValueReaderError::CannotPerformRequest(err.to_string())
+                })?;
 
-                let response = client.execute(request).await?;
-                debug!("Received {:?}", response);
+                let response = client
+                    .execute(request)
+                    .await
+                    .map_err(|err| RestKeyValueReaderError::ConnectionError(err.to_string()))?;
 
-                // Handle non-success statuses
+                // Handle unexpected statuses
                 let status = response.status();
                 if !status.is_success() {
-                    send(Err(RestKeyValueReaderError::UnexpectedStatus(status))).await;
-                    break;
+                    let response_body = response.text().await.map_err(|err| {
+                        RestKeyValueReaderError::UnexpectedStatus(status, err.to_string())
+                    })?;
+
+                    return Err(RestKeyValueReaderError::UnexpectedStatus(
+                        status,
+                        response_body,
+                    ));
                 }
 
-                // Setup CSV deserializer
+                // Set up a CSV deserializer
                 let error_mapping = |err| std::io::Error::new(std::io::ErrorKind::Other, err);
                 let stream = response.bytes_stream().map_err(error_mapping);
                 let stream_reader = StreamReader::new(stream);
@@ -110,98 +115,106 @@ impl Reader for RestKeyValueReader {
                 // Read and send everything
                 let mut counter = 0;
                 while let Some(record) = records.next().await {
-                    let entry: Entry = match record {
-                        Ok(csv_row) => {
-                            let kv: KeyValueRow = csv_row.into();
-                            trace!("Read row {:?}", kv);
-
-                            cursor = Some(kv.clone());
-                            Ok(kv)
-                        }
-                        Err(err) => Err(err.into()),
-                    };
-                    send(entry).await;
+                    let entry = record.map_err(|err| {
+                        RestKeyValueReaderError::ResponseFormatError(err.to_string())
+                    })?;
+                    let permit = permits.next().expect("Permit should exist");
+                    let kv_row: KeyValueRow = entry.into();
+                    cursor = Some((&kv_row).into());
+                    permit.send(kv_row);
                     counter += 1;
                 }
 
-                // Break if it was the last batch
-                let last_batch = counter < batch_size;
-                if last_batch {
+                // Break if it was the last page
+                let last_page = counter < page_size;
+                if last_page {
                     break;
                 }
             }
 
-            Result::<(), RestKeyValueReaderError>::Ok(())
+            Ok(())
+        });
+
+        // Put the latch, task and receiver into a stream state
+        let initial_state = State::Reading {
+            start_latch,
+            read_task: AbortOnDropHandle::new(read_task),
+            receiver,
         };
 
-        let initial_state = SmartBuffer::new(self.batch_size, refill_fn);
-        unfold(initial_state, |mut state| async {
-            state.next().await.map(|it| (it, state))
+        // Create an async stream that receives single row on each next() call
+        unfold(initial_state, |state| async {
+            let State::Reading {
+                start_latch,
+                read_task,
+                mut receiver,
+            } = state
+            else {
+                // Stop the caller when it's stopped reading.
+                return None;
+            };
+
+            // Start reading.
+            start_latch.notify_one();
+
+            // Read the next entry.
+            if let Some(entry) = receiver.recv().await {
+                let next_state = State::Reading {
+                    start_latch,
+                    read_task,
+                    receiver,
+                };
+                return Some((Ok(entry), next_state));
+            }
+
+            // Wait until the read task completes.
+            match read_task.await {
+                // Success, stopping.
+                Ok(Ok(())) => None,
+
+                // An error happened while reading, return it and move to the terminal state.
+                Ok(Err(err)) => Some((Err(err), State::Terminal)),
+
+                // Read task was interrupted for some reason, return an error and move to
+                // the terminal state.
+                Err(join_err) => {
+                    let msg = format!("Read task panicked or aborted: {}", join_err);
+                    let err = RestKeyValueReaderError::Interrupted(msg);
+                    Some((Err(err), State::Terminal))
+                }
+            }
         })
         .boxed()
     }
 }
 
+/// State of the stream.
+enum State {
+    /// In this state reading isn't yet completed.
+    Reading {
+        /// This latch keeps reader from reading the first page until the first element has been called.
+        start_latch: Arc<Notify>,
+        /// The reader task that will be aborted whether the entire stream has been consumed or not.
+        read_task: AbortOnDropHandle<Result<(), RestKeyValueReaderError>>,
+        /// Receiver of rows.
+        receiver: Receiver<KeyValueRow>,
+    },
+    /// Terminal state. It plays the same role as EOF.
+    Terminal,
+}
+
 #[derive(Error, Debug, PartialEq)]
 pub enum RestKeyValueReaderError {
-    #[error("Error while reading response: {0}")]
-    ReadError(String),
-    #[error("Unexpected status {0}")]
-    UnexpectedStatus(StatusCode),
-    #[error("Request error {0}")]
-    RequestError(String),
-    #[error("Unknown error while reading key-values")]
-    Unknown,
-}
-
-impl From<csv_async::Error> for RestKeyValueReaderError {
-    fn from(value: csv_async::Error) -> Self {
-        Self::ReadError(value.to_string())
-    }
-}
-
-impl From<reqwest::Error> for RestKeyValueReaderError {
-    fn from(value: reqwest::Error) -> Self {
-        Self::RequestError(value.to_string())
-    }
-}
-
-#[derive(Default, Serialize)]
-pub struct Query {
-    namespace: Option<String>,
-    name: Option<String>,
-    key: Option<String>,
-    value: Option<String>,
-    last_namespace: Option<String>,
-    last_name: Option<String>,
-    last_key: Option<String>,
-    size: Option<usize>,
-}
-
-impl Query {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn selector(mut self, selector: &KeyValueSelector) -> Self {
-        self.namespace = selector.namespace.to_owned();
-        self.name = selector.name.to_owned();
-        self.key = selector.key.to_owned();
-        self.value = selector.value.to_owned();
-        self
-    }
-
-    pub fn last(mut self, kvr: &KeyValueRow) -> Self {
-        self.last_namespace = Some(kvr.namespace.to_owned());
-        self.last_name = Some(kvr.name.to_owned());
-        self.last_key = Some(kvr.key.to_owned());
-        self
-    }
-
-    pub fn size(mut self, size: usize) -> Self {
-        self.size = Some(size);
-        self
-    }
+    #[error("Read interrupted: {0}")]
+    Interrupted(String),
+    #[error("Response format error: {0}")]
+    ResponseFormatError(String),
+    #[error("Unexpected status: {0}, {1}")]
+    UnexpectedStatus(StatusCode, String),
+    #[error("Connection error: {0}")]
+    ConnectionError(String),
+    #[error("Cannot perform request: {0}")]
+    CannotPerformRequest(String),
 }
 
 #[cfg(test)]
@@ -276,8 +289,12 @@ mod tests {
             Ok(KeyValueRow::new("robots","T-1000","status","Experimental Phase 1")),
         ];
 
-        let reader = RestKeyValueReader::new(&server.base_url(), 5);
-        let stream = reader.read(|it| it.namespace("robots").name("T-1000").build());
+        let reader = RestKeyValueReader {
+            client: Client::new(),
+            uri: server.base_url(),
+            page_size: 5,
+        };
+        let stream = reader.read(|it| it.namespace("robots").name("T-1000").select());
         let actual: Vec<_> = stream.collect().await;
 
         assert_eq!(actual, expected);

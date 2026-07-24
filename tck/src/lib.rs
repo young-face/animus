@@ -31,7 +31,7 @@ pub async fn ensure_compatible<
 
     upserter.tx(upserting_all(existing_rows.clone())).await;
 
-    let read_stream = reader.read(|it| it.namespace("robots").build());
+    let read_stream = reader.read(|it| it.namespace("robots").select());
     let read_results: Vec<Result<KeyValueRow, ReaderError>> = read_stream.collect().await;
     let expected_read_results: Vec<Result<KeyValueRow, ReaderError>> =
         existing_rows.into_iter().map(|it| Ok(it)).collect();

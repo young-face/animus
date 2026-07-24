@@ -52,7 +52,7 @@ impl KeyValueSelectionDirectives {
     }
 
     /// Finish composing selection.
-    pub fn build(self) -> KeyValueSelector {
+    pub fn select(self) -> KeyValueSelector {
         KeyValueSelector {
             namespace: self.namespace,
             name: self.name,

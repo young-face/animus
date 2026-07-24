@@ -10,6 +10,7 @@ rest-common = { workspace = true }
 bytes = { workspace = true }
 csv-async = { workspace = true, features = ["tokio"] }
 futures = { workspace = true }
+futures-core = { workspace = true }
 http = { workspace = true }
 reqwest = { workspace = true, features = ["query", "stream"] }
 serde = {
