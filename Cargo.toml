@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["api", "rest/client", "rest/common", "tck"]
+members = ["api", "rest/client", "rest/common", "rest/server", "tck"]
 
 [workspace.dependencies]
 # Internal
