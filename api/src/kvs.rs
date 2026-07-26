@@ -1,4 +1,29 @@
-/// This module contains abstractions for working with Key Value Sotrage (KVS).
+use thiserror::Error;
+
+use crate::engine::{InTransaction, Reader, Upsert};
+
+pub type KeyValueStorageReader = Box<
+    dyn Reader<
+        KeyValueRow,
+        KeyValueSelectionDirectives,
+        KeyValueSelector,
+        KeyValueStorageReaderError,
+    >,
+>;
+
+#[derive(Error, Debug, PartialEq)]
+pub enum KeyValueStorageReaderError {}
+
+pub type KeyValueStorageUpsert = Box<dyn Upsert<(), KeyValueRow, KeyValueUpsertError> + Send>;
+
+#[derive(Error, Debug, PartialEq)]
+pub enum KeyValueUpsertError {}
+
+pub type KeyValueStorageTxUpsert =
+    Box<dyn InTransaction<KeyValueStorageUpsert, Result<(), KeyValueUpsertTxError>>>;
+
+#[derive(Error, Debug, PartialEq)]
+pub enum KeyValueUpsertTxError {}
 
 /// The main key-value abstraction.
 #[derive(Debug, PartialEq, Clone)]

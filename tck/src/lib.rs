@@ -1,35 +1,26 @@
-use std::{error::Error, fmt::Debug};
-
-use api::engine::{InTransaction, Reader, Upsert};
-use api::kvs::{KeyValueRow, KeyValueSelectionDirectives, KeyValueSelector};
+use api::{
+    engine::TxConsumer,
+    kvs::{
+        KeyValueRow, KeyValueStorageReader, KeyValueStorageReaderError, KeyValueStorageTxUpsert,
+        KeyValueStorageUpsert,
+    },
+};
 use futures::StreamExt;
 
-pub async fn ensure_compatible<
-    ReaderError: Error + PartialEq + Debug,
-    UpsertTxError: Error + PartialEq + Debug,
-    UpsertError: Error + PartialEq + Debug,
->(
-    reader: impl Reader<
-        Subject = KeyValueRow,
-        SelectionDirectives = KeyValueSelectionDirectives,
-        Selector = KeyValueSelector,
-        Error = ReaderError,
-    >,
-    upserter: impl InTransaction<Box<dyn Upsert<(), KeyValueRow, UpsertError>>, UpsertTxError>,
-) {
-    let existing_rows = vec![KeyValueRow::new(
+pub async fn ensure_compatible(reader: KeyValueStorageReader, upserter: KeyValueStorageTxUpsert) {
+    let existing_row = KeyValueRow::new(
         "robots",
         "T-1000",
         "classification",
         "Infiltration and Assasination Unit",
-    )];
+    );
 
-    upserter.tx(upserting_all(existing_rows.clone())).await;
+    upserter.tx(upserting_one(existing_row.clone())).await;
 
-    let read_stream = reader.read(|it| it.namespace("robots").select());
-    let read_results: Vec<Result<KeyValueRow, ReaderError>> = read_stream.collect().await;
-    let expected_read_results: Vec<Result<KeyValueRow, ReaderError>> =
-        existing_rows.into_iter().map(|it| Ok(it)).collect();
+    let read_stream = reader.read(&|it| it.namespace("robots").select());
+    let read_results: Vec<Result<KeyValueRow, KeyValueStorageReaderError>> =
+        read_stream.collect().await;
+    let expected_read_results = vec![Ok(existing_row)];
 
     assert_eq!(
         read_results, expected_read_results,
@@ -37,16 +28,13 @@ pub async fn ensure_compatible<
     );
 }
 
-fn upserting_all<E: Error + Debug>(
-    subj: impl IntoIterator<Item = KeyValueRow>,
-) -> impl AsyncFnOnce(Box<dyn Upsert<(), KeyValueRow, E>>) -> Box<dyn Upsert<(), KeyValueRow, E>> {
-    async |tx| {
-        let iter = subj.into_iter();
-        for row in iter {
+fn upserting_one(row: KeyValueRow) -> TxConsumer<KeyValueStorageUpsert> {
+    Box::new(|tx| {
+        Box::pin(async move {
             tx.upsert(&|_| KeyValueRow::new(&row.namespace, &row.name, &row.key, &row.value))
                 .await
-                .expect("Error while upserting all");
-        }
-        tx
-    }
+                .expect("Error while upserting one");
+            tx
+        })
+    })
 }

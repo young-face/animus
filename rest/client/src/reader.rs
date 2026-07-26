@@ -29,16 +29,13 @@ pub struct RestKeyValueReader {
 /// - Load the first page on demand, when the first element is requested by
 ///   a caller.
 /// - Load the next page when the previous one has been consumed.
-impl Reader for RestKeyValueReader {
-    type Subject = KeyValueRow;
-    type SelectionDirectives = KeyValueSelectionDirectives;
-    type Selector = KeyValueSelector;
-    type Error = RestKeyValueReaderError;
-
-    fn read<S>(&self, selection: S) -> BoxStream<'static, Result<Self::Subject, Self::Error>>
-    where
-        S: FnOnce(Self::SelectionDirectives) -> Self::Selector,
-    {
+impl Reader<KeyValueRow, KeyValueSelectionDirectives, KeyValueSelector, RestKeyValueReaderError>
+    for RestKeyValueReader
+{
+    fn read(
+        &self,
+        selection: &dyn Fn(KeyValueSelectionDirectives) -> KeyValueSelector,
+    ) -> BoxStream<'static, Result<KeyValueRow, RestKeyValueReaderError>> {
         // Build the selector
         let directives = KeyValueSelectionDirectives::default();
         let selector = selection(directives);
@@ -295,7 +292,7 @@ mod tests {
             uri: server.base_url(),
             page_size: 5,
         };
-        let stream = reader.read(|it| it.namespace("robots").name("T-1000").select());
+        let stream = reader.read(&mut |it| it.namespace("robots").name("T-1000").select());
         let actual: Vec<_> = stream.collect().await;
 
         assert_eq!(actual, expected);
