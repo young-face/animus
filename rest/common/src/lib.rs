@@ -1,4 +1,4 @@
-use api::{KeyValueRow, KeyValueSelector};
+use api::kvs::{KeyValueRow, KeyValueSelector};
 use serde::{Deserialize, Serialize};
 
 /// Data Transfer Object for CSV.

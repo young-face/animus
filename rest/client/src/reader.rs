@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use api::{KeyValueRow, KeyValueSelectionDirectives, KeyValueSelector, Reader};
+use api::engine::Reader;
+use api::kvs::{KeyValueRow, KeyValueSelectionDirectives, KeyValueSelector};
 use csv_async::AsyncDeserializer;
 use futures::{prelude::stream::BoxStream, stream::unfold, StreamExt, TryStreamExt};
 use http::StatusCode;

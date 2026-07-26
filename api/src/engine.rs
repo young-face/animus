@@ -1,14 +1,20 @@
+/// This module contains the most general abstrations for basic scenarios among
+/// the entire project.
 use std::pin::Pin;
 
 use futures::stream::BoxStream;
 
-/// This is a common Reader abstraction, used in Animus. It represents a simple
-/// reading scenario.
+/// This is a general Reader abstraction, used in the project. It represents a
+/// simple reading scenario. It requires following features from implementations:
+///
+/// - Utilizing asynchronism.
+/// - Using directives for seletion instead of plain params.
+/// - Separate the process of building selecor from the selector itself.
 pub trait Reader {
-    /// Somethinh what Reader reads.
+    /// Something what Reader reads.
     type Subject;
 
-    /// Selection capabilities. It's used to setup the `Selector`.
+    /// Selection capabilities. It's used to set up the `Selector`.
     type SelectionDirectives;
 
     /// Rules for selection.

@@ -1,3 +1,5 @@
+/// This module contains abstractions for working with Key Value Sotrage (KVS).
+
 /// The main key-value abstraction.
 #[derive(Debug, PartialEq, Clone)]
 pub struct KeyValueRow {

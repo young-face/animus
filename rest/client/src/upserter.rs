@@ -1,6 +1,9 @@
 use std::{pin::Pin, sync::Arc};
 
-use api::{InTransaction, KeyValueRow, Upsert};
+use api::{
+    engine::{InTransaction, Upsert},
+    kvs::KeyValueRow,
+};
 use bytes::Bytes;
 use csv_async::AsyncSerializer;
 use futures::TryStreamExt;
@@ -141,7 +144,6 @@ enum RestKeyValueUpsertError {
 #[cfg(test)]
 mod tests {
 
-    use api::{KeyValueRow, Upsert};
     use httpmock::MockServer;
 
     use super::*;
