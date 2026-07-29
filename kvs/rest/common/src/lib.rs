@@ -1,7 +1,7 @@
 use kvs_api::{KeyValueRow, KeyValueSelector};
 use serde::{Deserialize, Serialize};
 
-/// Data Transfer Object for CSV.
+/// A Data Transfer Object that is designed for representing a CSV row.
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CsvKeyValueRow {
     pub namespace: String,
@@ -48,6 +48,7 @@ impl From<&KeyValueRow> for Cursor {
     }
 }
 
+/// The schema of HTTP query parameters.
 #[derive(Default, Serialize)]
 pub struct Query {
     namespace: Option<String>,

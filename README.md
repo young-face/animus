@@ -25,6 +25,7 @@ We could do the same for any hierarchical input including xml, yaml or even md f
 Animus provides a storage where those key-values could be stored and from where they could be read. It also aims to provide
 such aspects as access control, audit and versioning.
 
-## Architecture
+### Components
 
-I want to keep this project independent of specific datasources, schemas or protocols. It's a mediator between all of them, not the best or the only one key-value storage.
+- [Engine](engine/README.md)
+- [Key-Value Storage](kvs/README.md)
