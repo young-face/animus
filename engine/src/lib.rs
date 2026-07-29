@@ -1,5 +1,3 @@
-/// This module contains the most general abstractions for basic scenarios among
-/// the entire project.
 use std::{error::Error, pin::Pin};
 
 use futures::stream::BoxStream;

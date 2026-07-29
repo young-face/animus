@@ -1,0 +1,12 @@
+[package]
+name = "animus-kvs-tck"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Internal
+engine.workspace = true
+kvs-api.workspace = true
+
+# External
+futures.workspace = true

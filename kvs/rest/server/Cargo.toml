@@ -1,0 +1,11 @@
+[package]
+name = "animus-kvs-rest-server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Internal
+kvs-rest-common.workspace = true
+
+# External
+axum.workspace = true

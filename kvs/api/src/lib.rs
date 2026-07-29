@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::engine::{InTransaction, Reader, Upsert};
+use engine::{InTransaction, Reader, Upsert};
 
 pub type KeyValueStorageReader = Box<
     dyn Reader<

@@ -1,17 +1,20 @@
 [package]
-name = "animus-rest-client"
+name = "animus-kvs-rest-client"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-api = { workspace = true }
-rest-common = { workspace = true }
+# Internal
+engine.workspace = true
+kvs-api.workspace = true
+kvs-rest-common.workspace = true
 
-bytes = { workspace = true }
+# External
+bytes.workspace = true
 csv-async = { workspace = true, features = ["tokio"] }
-futures = { workspace = true }
-futures-core = { workspace = true }
-http = { workspace = true }
+futures.workspace = true
+futures-core.workspace = true
+http.workspace = true
 reqwest = { workspace = true, features = ["query", "stream"] }
 serde = {
   workspace = true,
@@ -19,11 +22,11 @@ serde = {
     "derive",
   ]
 }
-thiserror = { workspace = true }
+thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "net"] }
 tokio-util = { workspace = true, features = ["rt"] }
-tracing = { workspace = true }
-tracing-test = { workspace = true }
+tracing.workspace = true
+tracing-test.workspace = true
 
 [dev-dependencies]
-httpmock = { workspace = true }
+httpmock.workspace = true

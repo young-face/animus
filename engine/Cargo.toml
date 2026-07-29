@@ -1,8 +1,8 @@
 [package]
-name = "animus-api"
+name = "animus-engine"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-futures = { workspace = true }
+futures.workspace = true
 thiserror.workspace = true

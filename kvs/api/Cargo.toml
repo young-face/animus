@@ -1,0 +1,11 @@
+[package]
+name = "animus-kvs-api"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+engine.workspace = true
+
+# External
+futures.workspace = true
+thiserror.workspace = true

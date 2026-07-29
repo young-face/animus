@@ -1,11 +1,9 @@
-use api::{
-    engine::TxConsumer,
-    kvs::{
-        KeyValueRow, KeyValueStorageReader, KeyValueStorageReaderError, KeyValueStorageTxUpsert,
-        KeyValueStorageUpsert,
-    },
-};
+use engine::TxConsumer;
 use futures::StreamExt;
+use kvs_api::{
+    KeyValueRow, KeyValueStorageReader, KeyValueStorageReaderError, KeyValueStorageTxUpsert,
+    KeyValueStorageUpsert,
+};
 
 pub async fn ensure_compatible(reader: KeyValueStorageReader, upserter: KeyValueStorageTxUpsert) {
     let existing_row = KeyValueRow::new(

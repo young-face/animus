@@ -1,15 +1,33 @@
 [workspace]
 resolver = "3"
-members = ["api", "rest/client", "rest/common", "rest/server", "tck"]
+members = [
+  "engine",
+  "kvs/api",
+  "kvs/rest/client",
+  "kvs/rest/common",
+  "kvs/rest/server",
+  "kvs/tck",
+]
 
 [workspace.dependencies]
 # Internal
-api = { package = "animus-api", path = "api" }
-rest-common = { package = "animus-rest-common", path = "rest/common" }
-tck = { package = "animus-tck", path = "tck" }
+engine = { package = "animus-engine", path = "engine" }
+kvs-api = { package = "animus-kvs-api", path = "kvs/api" }
+kvs-rest-client = {
+  package = "animus-kvs-rest-client",
+  path = "kvs/rest/client"
+}
+kvs-rest-common = {
+  package = "animus-kvs-rest-common",
+  path = "kvs/rest/common"
+}
+kvs-rest-server = {
+  package = "animus-kvs-rest-server",
+  path = "kvs/rest/server"
+}
+kvs-tck = { package = "animus-kvs-tck", path = "kvs/tck" }
 
 # External
-
 axum = "0.8.9"
 bytes = "1.12.1"
 console-subscriber = "0.5.0"
