@@ -1,14 +1,17 @@
+use std::sync::Arc;
+
 use thiserror::Error;
 
 use engine::{InTransaction, Reader, Upsert};
 
-pub type KeyValueStorageReader = Box<
+pub type KeyValueStorageReader = Arc<
     dyn Reader<
-        KeyValueRow,
-        KeyValueSelectionDirectives,
-        KeyValueSelector,
-        KeyValueStorageReaderError,
-    >,
+            KeyValueRow,
+            KeyValueSelectionDirectives,
+            KeyValueSelector,
+            KeyValueStorageReaderError,
+        > + Send
+        + Sync,
 >;
 
 #[derive(Error, Debug, PartialEq)]
@@ -20,7 +23,7 @@ pub type KeyValueStorageUpsert = Box<dyn Upsert<(), KeyValueRow, KeyValueUpsertE
 pub enum KeyValueUpsertError {}
 
 pub type KeyValueStorageTxUpsert =
-    Box<dyn InTransaction<KeyValueStorageUpsert, Result<(), KeyValueUpsertTxError>>>;
+    Arc<dyn InTransaction<KeyValueStorageUpsert, Result<(), KeyValueUpsertTxError>> + Send + Sync>;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum KeyValueUpsertTxError {}

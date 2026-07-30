@@ -62,6 +62,7 @@ dependencies = [
 name = "animus-kvs-rest-server"
 version = "0.1.0"
 dependencies = [
+ "animus-kvs-api",
  "animus-kvs-rest-common",
  "axum",
 ]
