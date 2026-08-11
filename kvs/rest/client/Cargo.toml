@@ -9,6 +9,7 @@ engine.workspace = true
 kvs-api.workspace = true
 kvs-rest-common.workspace = true
 
+base64.workspace = true
 # External
 bytes.workspace = true
 csv-async = { workspace = true, features = ["tokio"] }

@@ -4,18 +4,42 @@ use thiserror::Error;
 
 use engine::{InTransaction, Reader, Upsert};
 
+/// Reader of key-value storage.
 pub type KeyValueStorageReader = Arc<
     dyn Reader<
             KeyValueRow,
             KeyValueSelectionDirectives,
-            KeyValueSelector,
+            KeyValueSelectionTermination,
+            KeyValueStorageReaderMetadata,
             KeyValueStorageReaderError,
         > + Send
         + Sync,
 >;
 
-#[derive(Error, Debug, PartialEq)]
-pub enum KeyValueStorageReaderError {}
+/// Cursor that tells where to resume reading.
+pub type Cursor = Vec<u8>;
+
+/// Metadata of read operation. It contains some information about the operation
+/// itself.
+#[derive(Debug, Clone)]
+pub struct KeyValueStorageReaderMetadata {
+    /// Cursor that can be None if there is no more data to read.
+    pub cursor: Option<Cursor>,
+}
+
+impl KeyValueStorageReaderMetadata {
+    pub fn with_cursor(cursor: &[u8]) -> Self {
+        Self {
+            cursor: Some(cursor.to_owned()),
+        }
+    }
+}
+
+#[derive(Error, Debug, PartialEq, Clone)]
+pub enum KeyValueStorageReaderError {
+    #[error("Unexpected error while reading: {0}")]
+    UnknownError(String),
+}
 
 pub type KeyValueStorageUpsert = Box<dyn Upsert<(), KeyValueRow, KeyValueUpsertError> + Send>;
 
@@ -60,6 +84,7 @@ pub struct KeyValueSelectionDirectives {
     name: Option<String>,
     key: Option<String>,
     value: Option<String>,
+    cursor: Option<Cursor>,
 }
 
 impl KeyValueSelectionDirectives {
@@ -81,22 +106,29 @@ impl KeyValueSelectionDirectives {
         self
     }
 
+    pub fn cursor(mut self, cursor: &Cursor) -> Self {
+        self.cursor = Some(cursor.to_owned());
+        self
+    }
+
     /// Finish composing selection.
-    pub fn select(self) -> KeyValueSelector {
-        KeyValueSelector {
+    pub fn select(self) -> KeyValueSelectionTermination {
+        KeyValueSelectionTermination {
             namespace: self.namespace,
             name: self.name,
             key: self.key,
             value: self.value,
+            cursor: self.cursor,
         }
     }
 }
 
 /// A set of expressions for matching rows.
 #[derive(Debug, Clone)]
-pub struct KeyValueSelector {
+pub struct KeyValueSelectionTermination {
     pub namespace: Option<String>,
     pub name: Option<String>,
     pub key: Option<String>,
     pub value: Option<String>,
+    pub cursor: Option<Cursor>,
 }

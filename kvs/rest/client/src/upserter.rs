@@ -6,7 +6,7 @@ use engine::{InTransaction, TxConsumer, TxFuture, Upsert, UpsertFuture};
 use futures::TryStreamExt;
 use http::status::StatusCode;
 use kvs_api::KeyValueRow;
-use kvs_rest_common::CsvKeyValueRow;
+use kvs_rest_common::csv::CsvKeyValueRow;
 use reqwest::{Body, Client};
 use thiserror::Error;
 use tokio::{

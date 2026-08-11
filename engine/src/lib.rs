@@ -1,23 +1,26 @@
-use std::{error::Error, pin::Pin};
+use std::pin::Pin;
 
 use futures::stream::BoxStream;
 
-/// This is a general Reader abstraction. It represents a simple reading
-/// scenario. It requires following features from implementations:
+/// This is general Reader abstraction. It represents read-by-selection scenario
+/// and has the following features:
 ///
+/// - Using Directives -> Termination pattern for selection.
+/// - Returning a touple of (stream, metadata).
 /// - Utilizing asynchronism.
-/// - Using directives for seletion instead of plain params.
-/// - Separate the process of building selecor from the selector itself.
-pub trait Reader<Subject, SelectionDirectives, Selector, Err: Error> {
-    /// Read something asynchronously.
+pub trait Reader<Subject, SelectionDirectives, SelectionTermination, Metadata, Err> {
+    /// Read all subjects by selection asynchronously.
     fn read(
         &self,
-        selection: &dyn Fn(SelectionDirectives) -> Selector,
-    ) -> BoxStream<'static, Result<Subject, Err>>;
+        selection: &dyn Fn(SelectionDirectives) -> SelectionTermination,
+    ) -> ReaderFut<Result<(ReaderStream<Result<Subject, Err>>, Metadata), Err>>;
 }
 
-pub type TxConsumer<Tx> = Box<dyn FnOnce(Tx) -> Pin<Box<dyn Future<Output = Tx> + Send>> + Send>;
-pub type TxFuture<R> = Pin<Box<dyn Future<Output = R> + Send>>;
+/// Future that is returned by reader.
+pub type ReaderFut<T> = Pin<Box<dyn Future<Output = T> + Send>>;
+
+/// Reading stream.
+pub type ReaderStream<T> = BoxStream<'static, T>;
 
 /// Common abstraction for transactional scenarios.
 pub trait InTransaction<Tx, R> {
@@ -27,7 +30,11 @@ pub trait InTransaction<Tx, R> {
     fn tx(&self, block: TxConsumer<Tx>) -> TxFuture<R>;
 }
 
-pub type UpsertFuture<R> = Pin<Box<dyn Future<Output = R> + Send>>;
+/// Transaction consumer.
+pub type TxConsumer<Tx> = Box<dyn FnOnce(Tx) -> Pin<Box<dyn Future<Output = Tx> + Send>> + Send>;
+
+/// A future returned by the transactional scenario.
+pub type TxFuture<R> = Pin<Box<dyn Future<Output = R> + Send>>;
 
 /// Common `upsert` abstraction. Upsert in this context means insert or update.
 /// `Directives` define customization capabilities for upsert process.
@@ -40,3 +47,6 @@ pub trait Upsert<Directives, Termination, Err> {
     /// required customizations.
     fn upsert(&self, block: &dyn Fn(Directives) -> Termination) -> UpsertFuture<Result<(), Err>>;
 }
+
+/// A future that is returned by the upsert scenario.
+pub type UpsertFuture<R> = Pin<Box<dyn Future<Output = R> + Send>>;

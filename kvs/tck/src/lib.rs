@@ -15,15 +15,20 @@ pub async fn ensure_compatible(reader: KeyValueStorageReader, upserter: KeyValue
 
     upserter.tx(upserting_one(existing_row.clone())).await;
 
-    let read_stream = reader.read(&|it| it.namespace("robots").select());
-    let read_results: Vec<Result<KeyValueRow, KeyValueStorageReaderError>> =
-        read_stream.collect().await;
+    let (stream, metadata) = reader
+        .read(&|it| it.namespace("robots").select())
+        .await
+        .expect("Got an error while reading");
+
+    let read_results: Vec<Result<KeyValueRow, KeyValueStorageReaderError>> = stream.collect().await;
     let expected_read_results = vec![Ok(existing_row)];
 
     assert_eq!(
         read_results, expected_read_results,
         "Ensure read the same after upsert"
     );
+
+    assert_eq!(metadata.cursor, None);
 }
 
 fn upserting_one(row: KeyValueRow) -> TxConsumer<KeyValueStorageUpsert> {
