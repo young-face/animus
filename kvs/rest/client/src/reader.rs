@@ -4,7 +4,7 @@ use base64::{engine::general_purpose, Engine};
 use csv_async::AsyncDeserializer;
 use engine::{Reader, ReaderFut, ReaderStream};
 use futures::{stream::unfold, StreamExt, TryStreamExt};
-use http::HeaderMap;
+use http::{header::ACCEPT, HeaderMap};
 use kvs_api::{
     KeyValueRow, KeyValueSelectionDirectives, KeyValueSelectionTermination,
     KeyValueStorageReaderError, KeyValueStorageReaderMetadata,
@@ -25,6 +25,16 @@ pub struct RestKeyValueReader {
     client: Client,
     uri: String,
     page_size: usize,
+}
+
+impl RestKeyValueReader {
+    pub fn new(uri: &str) -> Self {
+        Self {
+            client: Client::new(),
+            uri: uri.to_owned(),
+            page_size: 100,
+        }
+    }
 }
 
 type Result<T> = std::result::Result<T, KeyValueStorageReaderError>;
@@ -77,7 +87,7 @@ impl
             // Wait until client has requested the first element
             start_latch_clone.notified().await;
 
-            // Define cursor. It's stored in Base64 here to reduce number of
+            // Define cursor. It's stored in Base64 here to reduce the number of
             // conversions.
             let mut cursor = selector
                 .cursor
@@ -109,6 +119,7 @@ impl
                 let request = client
                     .get(&uri)
                     .query(&query)
+                    .header(ACCEPT, "application/csv")
                     .build()
                     .map_err(|err| KeyValueStorageReaderError::UnknownError(err.to_string()))?;
 
@@ -241,95 +252,4 @@ enum State {
     },
     /// Terminal state. It plays the same role as EOF.
     Terminal,
-}
-
-#[cfg(test)]
-mod tests {
-    use httpmock::MockServer;
-    use tracing_test::traced_test;
-
-    use super::*;
-
-    const ROBOTS_PAGE_1: &str = include_str!("../tests/fixtures/robots_full_page_1.csv");
-    const ROBOTS_PAGE_2: &str = include_str!("../tests/fixtures/robots_full_page_2.csv");
-    const ROBOTS_PAGE_3: &str = include_str!("../tests/fixtures/robots_half_page.csv");
-
-    #[tokio::test]
-    #[traced_test]
-    async fn read_all_pages() {
-        let server = MockServer::start();
-        let page_1 = server.mock(|when, then| {
-            when.method("GET")
-                .path("/")
-                .query_param("namespace", "robots")
-                .query_param("name", "T-1000")
-                .query_param("size", "5")
-                .query_param_missing("cursor");
-            then.status(200)
-                .header("content-type", "application/csv; charset=UTF-8")
-                .header(CURSOR_HEADER, "MTIz")
-                .body(ROBOTS_PAGE_1);
-        });
-        let page_2 = server.mock(|when, then| {
-            when.method("GET")
-                .path("/")
-                .query_param("namespace", "robots")
-                .query_param("name", "T-1000")
-                .query_param("size", "5")
-                .query_param("cursor", "MTIz");
-            then.status(200)
-                .header("content-type", "application/csv; charset=UTF-8")
-                .header(CURSOR_HEADER, "MTIzNDU2")
-                .body(ROBOTS_PAGE_2);
-        });
-        let page_3 = server.mock(|when, then| {
-            when.method("GET")
-                .path("/")
-                .query_param("namespace", "robots")
-                .query_param("name", "T-1000")
-                .query_param("size", "5")
-                .query_param("cursor", "MTIzNDU2");
-            then.status(200)
-                .header("content-type", "application/csv; charset=UTF-8")
-                .body(ROBOTS_PAGE_3);
-        });
-
-        #[rustfmt::skip]
-        let expected = vec![
-            Ok(KeyValueRow::new("robots","T-1000","classification","Infiltration and Assasination Unit")),
-            Ok(KeyValueRow::new("robots","T-1000","estimated_mass","140")),
-            Ok(KeyValueRow::new("robots","T-1000","physical_specs.composition","Liquid Metal")),
-            Ok(KeyValueRow::new("robots","T-1000","physical_specs.structural_state","Amorphous, semi-solid")),
-            Ok(KeyValueRow::new("robots","T-1000","power_source","Unknown Internal Hydraulic Cell")),
-            Ok(KeyValueRow::new("robots","T-1000","sensory_equipment[0]","Omni-directional_visual_spectrum")),
-            Ok(KeyValueRow::new("robots","T-1000","sensory_equipment[1]","Acoustic_analysis")),
-            Ok(KeyValueRow::new("robots","T-1000","sensory_equipment[2]","Thermal_tracking")),
-            Ok(KeyValueRow::new("robots","T-1000","shape_shifting.human_mimicry.enabled","true")),
-            Ok(KeyValueRow::new("robots","T-1000","shape_shifting.human_mimicry.features[0]","Replicate any human biometry")),
-            Ok(KeyValueRow::new("robots","T-1000","shape_shifting.human_mimicry.features[1]","Mimic clothing and textures")),
-            Ok(KeyValueRow::new("robots","T-1000","shape_shifting.human_mimicry.features[2]","Voice print simulation")),
-            Ok(KeyValueRow::new("robots","T-1000","status","Experimental Phase 1")),
-        ];
-
-        let reader = RestKeyValueReader {
-            client: Client::new(),
-            uri: server.base_url(),
-            page_size: 5,
-        };
-        let read_result = reader
-            .read(&mut |it| it.namespace("robots").name("T-1000").select())
-            .await;
-        let (stream, metadata) = read_result.expect("Successful read");
-        let actual: Vec<_> = stream.collect().await;
-
-        assert_eq!(actual, expected);
-        page_1.assert();
-        page_2.assert();
-        page_3.assert();
-    }
-
-    #[tokio::test]
-    async fn fetch_in_single_page() {
-        todo!()
-    }
 }

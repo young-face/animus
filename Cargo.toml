@@ -5,7 +5,7 @@ members = [
   "kvs/api",
   "kvs/rest/client",
   "kvs/rest/common",
-  "kvs/rest/server",
+  "kvs/rest/server", "kvs/rest/tests",
   "kvs/tck",
 ]
 

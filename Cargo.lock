@@ -79,6 +79,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "animus-kvs-rest-tests"
+version = "0.1.0"
+dependencies = [
+ "animus-kvs-api",
+ "animus-kvs-rest-client",
+ "animus-kvs-rest-server",
+ "animus-kvs-tck",
+ "axum",
+ "futures",
+ "tokio",
+ "tracing",
+ "tracing-test",
+]
+
+[[package]]
 name = "animus-kvs-tck"
 version = "0.1.0"
 dependencies = [

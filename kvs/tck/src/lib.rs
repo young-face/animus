@@ -1,9 +1,85 @@
-use engine::TxConsumer;
+use std::sync::Arc;
+
+use engine::{Reader, ReaderFut, ReaderStream, TxConsumer};
 use futures::StreamExt;
 use kvs_api::{
-    KeyValueRow, KeyValueStorageReader, KeyValueStorageReaderError, KeyValueStorageTxUpsert,
+    KeyValueRow, KeyValueSelectionDirectives, KeyValueSelectionTermination, KeyValueStorageReader,
+    KeyValueStorageReaderError, KeyValueStorageReaderMetadata, KeyValueStorageTxUpsert,
     KeyValueStorageUpsert,
 };
+
+pub async fn ensure_reader_compatibility<D>(decorator: D)
+where
+    D: AsyncFnOnce(KeyValueStorageReader) -> KeyValueStorageReader,
+{
+    let expected = vec![Ok(KeyValueRow::new(
+        "robots",
+        "T-1000",
+        "classification",
+        "Infiltration and Assasination Unit",
+    ))];
+    let reader_mock = Arc::new(MockReader {
+        pages: vec![expected.clone()],
+    });
+    let reader_subject = decorator(reader_mock).await;
+    let (stream, _) = reader_subject
+        .read(&|it| it.select())
+        .await
+        .expect("Read must succeed");
+
+    let actual: Vec<_> = stream.collect().await;
+
+    assert_eq!(expected, actual);
+}
+
+type Page = Vec<Result<KeyValueRow, KeyValueStorageReaderError>>;
+
+struct MockReader {
+    pages: Vec<Page>,
+}
+
+impl
+    Reader<
+        KeyValueRow,
+        KeyValueSelectionDirectives,
+        KeyValueSelectionTermination,
+        KeyValueStorageReaderMetadata,
+        KeyValueStorageReaderError,
+    > for MockReader
+{
+    fn read(
+        &self,
+        selection: &dyn Fn(KeyValueSelectionDirectives) -> KeyValueSelectionTermination,
+    ) -> ReaderFut<
+        Result<
+            (
+                ReaderStream<Result<KeyValueRow, KeyValueStorageReaderError>>,
+                KeyValueStorageReaderMetadata,
+            ),
+            KeyValueStorageReaderError,
+        >,
+    > {
+        let directives = KeyValueSelectionDirectives::default();
+        let selector = selection(directives);
+        let KeyValueSelectionTermination { cursor, .. } = selector;
+
+        let page_number = cursor
+            .map(|cursor_bytes| usize::from_le_bytes(cursor_bytes.try_into().unwrap()))
+            .unwrap_or(0);
+
+        let page = self.pages.get(page_number).expect("Page does not exist");
+        let stream = futures::stream::iter(page.clone()).boxed();
+
+        let next_page_number = page_number + 1;
+        let metadata = if next_page_number >= self.pages.len() {
+            KeyValueStorageReaderMetadata::new()
+        } else {
+            KeyValueStorageReaderMetadata::with_cursor(&next_page_number.to_le_bytes())
+        };
+
+        Box::pin(futures::future::ready(Ok((stream, metadata))))
+    }
+}
 
 pub async fn ensure_compatible(reader: KeyValueStorageReader, upserter: KeyValueStorageTxUpsert) {
     let existing_row = KeyValueRow::new(

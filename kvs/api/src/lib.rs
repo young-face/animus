@@ -28,6 +28,10 @@ pub struct KeyValueStorageReaderMetadata {
 }
 
 impl KeyValueStorageReaderMetadata {
+    pub fn new() -> Self {
+        Self { cursor: None }
+    }
+
     pub fn with_cursor(cursor: &[u8]) -> Self {
         Self {
             cursor: Some(cursor.to_owned()),

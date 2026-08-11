@@ -1,0 +1,20 @@
+[package]
+name = "animus-kvs-rest-tests"
+version = "0.1.0"
+edition = "2024"
+
+[dev-dependencies]
+# internal
+
+kvs-api.workspace = true
+kvs-rest-client.workspace = true
+kvs-rest-server.workspace = true
+kvs-tck.workspace = true
+
+# external
+
+axum.workspace = true
+futures.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
+tracing.workspace = true
+tracing-test.workspace = true
