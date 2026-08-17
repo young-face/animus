@@ -59,6 +59,11 @@ pub struct Query {
 }
 
 impl Query {
+    pub fn limit(mut self, limit: &usize) -> Self {
+        self.limit = Some(limit.to_owned());
+        self
+    }
+
     pub fn cursor(mut self, cursor: &Cursor) -> Self {
         self.cursor = Some(cursor.to_owned());
         self

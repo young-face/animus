@@ -1,5 +1,11 @@
-use std::sync::Arc;
-
+use std::{
+    cmp::min,
+    sync::{
+        atomic::{AtomicUsize, Ordering::SeqCst},
+        Arc,
+    },
+};
+use std::sync::atomic::Ordering::Relaxed;
 use base64::{engine::general_purpose, Engine};
 use csv_async::AsyncDeserializer;
 use engine::{Reader, ReaderFut, ReaderStream};
@@ -69,7 +75,7 @@ impl
         selection: &dyn Fn(KeyValueSelectionDirectives) -> KeyValueSelectionTermination,
     ) -> ReaderFut<ReadResult> {
         // Build the selector
-        let directives = KeyValueSelectionDirectives::default().limit(&self.page_size);
+        let directives = KeyValueSelectionDirectives::default();
         let selector = selection(directives);
 
         // Set up a latch that signals reader start reading
@@ -92,7 +98,8 @@ impl
             let mut cursor = selector.cursor.clone();
 
             // Load the result set page-by-page
-            loop {
+            let count = AtomicUsize::new(0);
+            'read_pages: loop {
                 // Wait until page fits in buffer
                 let reserve = sender.reserve_many(page_size).await;
                 let mut permits = match reserve {
@@ -104,9 +111,10 @@ impl
                 };
 
                 // Build a query
+                let request_limit = min(page_size, selector.limit.unwrap_or(usize::MAX));
                 let query = match &cursor {
-                    Some(cursor) => Query::from(&selector).cursor(&cursor),
-                    None => Query::from(&selector),
+                    Some(cursor) => Query::from(&selector).limit(&request_limit).cursor(&cursor),
+                    None => Query::from(&selector).limit(&request_limit),
                 };
 
                 // Perform the request
@@ -155,6 +163,10 @@ impl
                     let permit = permits.next().expect("Permit should exist");
                     let kv_row: KeyValueRow = entry.into();
                     permit.send(kv_row);
+                    let current_count = count.fetch_add(1, Relaxed) + 1;
+                    if let Some(limit) = selector.limit && current_count >= limit {
+                        break 'read_pages;
+                    }
                 }
 
                 // Stop when the server returned a response without cursor header.
