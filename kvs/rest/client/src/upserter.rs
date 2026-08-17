@@ -1,12 +1,10 @@
 use std::sync::Arc;
 
-use bytes::Bytes;
 use csv_async::AsyncSerializer;
 use engine::{InTransaction, TxConsumer, TxFuture, Upsert, UpsertFuture};
-use futures::TryStreamExt;
 use http::status::StatusCode;
 use kvs_api::KeyValueRow;
-use kvs_rest_common::csv::CsvKeyValueRow;
+use kvs_rest_common::CsvKeyValueRow;
 use reqwest::{Body, Client};
 use thiserror::Error;
 use tokio::{
@@ -45,7 +43,7 @@ impl InTransaction<Tx, TxResult> for RestKeyValueUpserter {
 
             // Run background upserting task
             let upsert_task = tokio::spawn(async move {
-                let byte_stream = ReaderStream::new(reader).map_ok(|chunk| Bytes::from(chunk));
+                let byte_stream = ReaderStream::new(reader);
                 let body = Body::wrap_stream(byte_stream);
                 client.post(uri).body(body).send().await
             });
@@ -143,7 +141,6 @@ enum RestKeyValueUpsertError {
 
 #[cfg(test)]
 mod tests {
-
     use httpmock::MockServer;
 
     use super::*;

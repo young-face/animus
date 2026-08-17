@@ -6,6 +6,7 @@ edition = "2024"
 [dev-dependencies]
 # internal
 
+engine.workspace = true
 kvs-api.workspace = true
 kvs-rest-client.workspace = true
 kvs-rest-server.workspace = true

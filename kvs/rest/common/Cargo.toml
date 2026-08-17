@@ -8,4 +8,6 @@ edition = "2024"
 kvs-api.workspace = true
 
 # External
+base64.workspace = true
 serde = { workspace = true, features = ["derive"] }
+validator = { workspace = true, features = ["derive"] }

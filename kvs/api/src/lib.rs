@@ -89,6 +89,7 @@ pub struct KeyValueSelectionDirectives {
     key: Option<String>,
     value: Option<String>,
     cursor: Option<Cursor>,
+    limit: Option<usize>,
 }
 
 impl KeyValueSelectionDirectives {
@@ -110,8 +111,15 @@ impl KeyValueSelectionDirectives {
         self
     }
 
+    /// A token for requesting the next batch.
     pub fn cursor(mut self, cursor: &Cursor) -> Self {
         self.cursor = Some(cursor.to_owned());
+        self
+    }
+
+    /// Limit for the selected batch.
+    pub fn limit(mut self, limit: &usize) -> Self {
+        self.limit = Some(limit.clone());
         self
     }
 
@@ -123,6 +131,7 @@ impl KeyValueSelectionDirectives {
             key: self.key,
             value: self.value,
             cursor: self.cursor,
+            limit: self.limit,
         }
     }
 }
@@ -135,4 +144,5 @@ pub struct KeyValueSelectionTermination {
     pub key: Option<String>,
     pub value: Option<String>,
     pub cursor: Option<Cursor>,
+    pub limit: Option<usize>,
 }

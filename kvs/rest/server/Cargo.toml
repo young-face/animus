@@ -11,13 +11,19 @@ kvs-rest-common.workspace = true
 # External
 async-stream.workspace = true
 axum = { workspace = true, features = ["macros"] }
+axum-extra = { workspace = true, features = ["typed-header"] }
 base64.workspace = true
 bytes.workspace = true
-csv.workspace = true
+csv-async.workspace = true
 futures.workspace = true
+headers.workspace = true
+headers-accept.workspace = true
+mediatype.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 tracing.workspace = true
 tracing-test.workspace = true
+validator.workspace = true
 
 [dev-dependencies]
 engine.workspace = true

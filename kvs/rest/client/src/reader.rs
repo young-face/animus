@@ -6,10 +6,10 @@ use engine::{Reader, ReaderFut, ReaderStream};
 use futures::{stream::unfold, StreamExt, TryStreamExt};
 use http::{header::ACCEPT, HeaderMap};
 use kvs_api::{
-    KeyValueRow, KeyValueSelectionDirectives, KeyValueSelectionTermination,
+    Cursor, KeyValueRow, KeyValueSelectionDirectives, KeyValueSelectionTermination,
     KeyValueStorageReaderError, KeyValueStorageReaderMetadata,
 };
-use kvs_rest_common::{csv::CsvKeyValueRow, headers::CURSOR_HEADER, query::Query};
+use kvs_rest_common::{CsvKeyValueRow, Query, CURSOR_HEADER};
 use reqwest::Client;
 use tokio::{
     sync::{
@@ -28,11 +28,11 @@ pub struct RestKeyValueReader {
 }
 
 impl RestKeyValueReader {
-    pub fn new(uri: &str) -> Self {
+    pub fn new(uri: &str, page_size: usize) -> Self {
         Self {
             client: Client::new(),
             uri: uri.to_owned(),
-            page_size: 100,
+            page_size,
         }
     }
 }
@@ -69,7 +69,7 @@ impl
         selection: &dyn Fn(KeyValueSelectionDirectives) -> KeyValueSelectionTermination,
     ) -> ReaderFut<ReadResult> {
         // Build the selector
-        let directives = KeyValueSelectionDirectives::default();
+        let directives = KeyValueSelectionDirectives::default().limit(&self.page_size);
         let selector = selection(directives);
 
         // Set up a latch that signals reader start reading
@@ -89,10 +89,7 @@ impl
 
             // Define cursor. It's stored in Base64 here to reduce the number of
             // conversions.
-            let mut cursor = selector
-                .cursor
-                .clone()
-                .map(|it| general_purpose::URL_SAFE.encode(it));
+            let mut cursor = selector.cursor.clone();
 
             // Load the result set page-by-page
             loop {
@@ -108,11 +105,8 @@ impl
 
                 // Build a query
                 let query = match &cursor {
-                    Some(cursor) => Query::new()
-                        .selector(&selector)
-                        .size(page_size)
-                        .cursor(&cursor),
-                    None => Query::new().selector(&selector).size(page_size),
+                    Some(cursor) => Query::from(&selector).cursor(&cursor),
+                    None => Query::from(&selector),
                 };
 
                 // Perform the request
@@ -121,13 +115,15 @@ impl
                     .query(&query)
                     .header(ACCEPT, "application/csv")
                     .build()
-                    .map_err(|err| KeyValueStorageReaderError::UnknownError(err.to_string()))?;
+                    .map_err(|err| format!("Request build error {}", err))
+                    .map_err(|err| KeyValueStorageReaderError::UnknownError(err))?;
 
                 // Obtain connection
                 let response = client
                     .execute(request)
                     .await
-                    .map_err(|err| KeyValueStorageReaderError::UnknownError(err.to_string()))?;
+                    .map_err(|err| format!("Response read error {}", err))
+                    .map_err(|err| KeyValueStorageReaderError::UnknownError(err))?;
 
                 // Handle unexpected statuses
                 let status = response.status();
@@ -226,15 +222,20 @@ impl
     }
 }
 
-fn extract_cursor(headers: &HeaderMap) -> Option<String> {
-    match headers.get(CURSOR_HEADER) {
-        Some(it) => Some(
-            it.to_str()
+fn extract_cursor(headers: &HeaderMap) -> Option<Cursor> {
+    headers
+        .get(CURSOR_HEADER)
+        .map(|bytes| {
+            bytes
+                .to_str()
                 .expect("Failed to read cursor header")
-                .to_owned(),
-        ),
-        None => None,
-    }
+                .to_owned()
+        })
+        .map(|header_value| {
+            general_purpose::URL_SAFE
+                .decode(header_value)
+                .expect("Decoding cursor failed")
+        })
 }
 
 /// State of the stream.
