@@ -157,6 +157,10 @@ impl
                         let msg = format!("Error while fetching next record {}", err.to_string());
                         KeyValueStorageReaderError::UnknownError(msg)
                     })?;
+
+                    // If permit doesn't exist here, it means that the server
+                    // has returned more elements than requested. That's not the
+                    // client problem.
                     let permit = permits.next().expect("Permit should exist");
                     let kv_row: KeyValueRow = entry.into();
                     permit.send(kv_row);
@@ -210,11 +214,12 @@ impl
                         // Success, stopping.
                         Ok(Ok(())) => None,
 
-                        // An error happened while reading, return it and move to the terminal state.
+                        // An error happened while reading, return it and move
+                        // to the terminal state.
                         Ok(Err(err)) => Some((Err(err), State::Terminal)),
 
-                        // Read task was interrupted for some reason, return an error and move to
-                        // the terminal state.
+                        // Read task was interrupted for some reason, return an
+                        // error and move to the terminal state.
                         Err(join_err) => {
                             let msg = format!("Read task panicked or aborted: {}", join_err);
                             let err = KeyValueStorageReaderError::UnknownError(msg);
