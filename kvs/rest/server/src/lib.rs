@@ -20,7 +20,7 @@ use mediatype::{
     names::{APPLICATION, CSV, TEXT},
     MediaType,
 };
-use tokio::io::{duplex, AsyncWriteExt};
+use tokio::io::duplex;
 use tokio_util::io::ReaderStream;
 use tracing::error;
 use validator::Validate;

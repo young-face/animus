@@ -1,11 +1,3 @@
-use std::{
-    cmp::min,
-    sync::{
-        atomic::{AtomicUsize, Ordering::SeqCst},
-        Arc,
-    },
-};
-use std::sync::atomic::Ordering::Relaxed;
 use base64::{engine::general_purpose, Engine};
 use csv_async::AsyncDeserializer;
 use engine::{Reader, ReaderFut, ReaderStream};
@@ -17,6 +9,7 @@ use kvs_api::{
 };
 use kvs_rest_common::{CsvKeyValueRow, Query, CURSOR_HEADER};
 use reqwest::Client;
+use std::{cmp::min, sync::Arc};
 use tokio::{
     sync::{
         mpsc::{self, Receiver},
@@ -25,7 +18,6 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_util::{io::StreamReader, task::AbortOnDropHandle};
-use tracing::debug;
 
 pub struct RestKeyValueReader {
     client: Client,
@@ -98,20 +90,23 @@ impl
             let mut cursor = selector.cursor.clone();
 
             // Load the result set page-by-page
-            let count = AtomicUsize::new(0);
-            'read_pages: loop {
+            let mut element_counter = 0;
+            'page_loop: loop {
                 // Wait until page fits in buffer
-                let reserve = sender.reserve_many(page_size).await;
-                let mut permits = match reserve {
-                    Ok(it) => it,
-                    Err(err) => {
-                        debug!("Read interrupted: {:?}", err);
-                        break;
-                    }
-                };
+                let mut permits = sender.reserve_many(page_size).await.map_err(|err| {
+                    let msg = format!("Read interrupted: {}", err.to_string());
+                    KeyValueStorageReaderError::UnknownError(msg)
+                })?;
+
+                // Choose the limit for the request: load either `page_size` of
+                // records or `selector.limit` records if it's present and less
+                // than the page size.
+                let request_limit = selector
+                    .limit
+                    .map(|client_limit| min(client_limit, page_size))
+                    .unwrap_or(page_size);
 
                 // Build a query
-                let request_limit = min(page_size, selector.limit.unwrap_or(usize::MAX));
                 let query = match &cursor {
                     Some(cursor) => Query::from(&selector).limit(&request_limit).cursor(&cursor),
                     None => Query::from(&selector).limit(&request_limit),
@@ -158,14 +153,20 @@ impl
 
                 // Read page
                 while let Some(record) = records.next().await {
-                    let entry = record
-                        .map_err(|err| KeyValueStorageReaderError::UnknownError(err.to_string()))?;
+                    let entry = record.map_err(|err| {
+                        let msg = format!("Error while fetching next record {}", err.to_string());
+                        KeyValueStorageReaderError::UnknownError(msg)
+                    })?;
                     let permit = permits.next().expect("Permit should exist");
                     let kv_row: KeyValueRow = entry.into();
                     permit.send(kv_row);
-                    let current_count = count.fetch_add(1, Relaxed) + 1;
-                    if let Some(limit) = selector.limit && current_count >= limit {
-                        break 'read_pages;
+
+                    // Stop if we reached the requested number of records.
+                    if let Some(limit) = selector.limit {
+                        element_counter += 1;
+                        if element_counter >= limit {
+                            break 'page_loop;
+                        }
                     }
                 }
 

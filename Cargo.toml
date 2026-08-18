@@ -14,18 +14,9 @@ members = [
 # Internal
 engine = { package = "animus-engine", path = "engine" }
 kvs-api = { package = "animus-kvs-api", path = "kvs/api" }
-kvs-rest-client = {
-  package = "animus-kvs-rest-client",
-  path = "kvs/rest/client"
-}
-kvs-rest-common = {
-  package = "animus-kvs-rest-common",
-  path = "kvs/rest/common"
-}
-kvs-rest-server = {
-  package = "animus-kvs-rest-server",
-  path = "kvs/rest/server"
-}
+kvs-rest-client = { package = "animus-kvs-rest-client", path = "kvs/rest/client" }
+kvs-rest-common = { package = "animus-kvs-rest-common", path = "kvs/rest/common" }
+kvs-rest-server = { package = "animus-kvs-rest-server", path = "kvs/rest/server" }
 kvs-tck = { package = "animus-kvs-tck", path = "kvs/tck" }
 
 # External
