@@ -9,6 +9,7 @@ use kvs_api::{
 };
 use kvs_rest_common::{CsvKeyValueRow, Query, CURSOR_HEADER};
 use reqwest::Client;
+use std::future::ready;
 use std::{cmp::min, sync::Arc};
 use tokio::{
     sync::{
@@ -44,15 +45,19 @@ type ReadResult = Result<(
 /// This implementation of `Reader` reads the data page-by-page and converts
 /// it into a continuous async stream of rows.
 ///
-/// The main features of the implementation are:
-/// - Using a cursor instead of the offset.
-/// - Load the first page on demand, when the first element is requested by
-///   a caller.
-/// - Load the next page when the previous one has been consumed.
+/// The main features of this implementation are:
+/// - Using a cursor instead of an offset.
+/// - Load pages on demand.
+/// - Load the next page when the previous one has been entirely consumed.
 ///
-/// Note: This implementation assumes that we can allocate a buffer with the size
-/// of a single page. This assumption limits the use of this implementation when
-/// page size is unbounded.
+/// RESTRICTION: Current implementation doesn't support the limit in the
+/// selector. Instead, it returns an error if limit appears in the selector.
+/// It's intentional because at the moment of implementation I can't decide how
+/// to handle that directive better on the client side.
+///
+/// LIMITATION: This implementation assumes that we can allocate a buffer with
+/// the size of a single page. This assumption limits the use of this
+/// implementation when page size is unbounded.
 impl
     Reader<
         KeyValueRow,
@@ -69,6 +74,13 @@ impl
         // Build the selector
         let directives = KeyValueSelectionDirectives::default();
         let selector = selection(directives);
+
+        // Handle the limit
+        if selector.limit.is_some() {
+            let msg = "Limit is unsupported in this client";
+            let err = KeyValueStorageReaderError::UnknownError(msg.to_owned());
+            return Box::pin(ready(Err(err)));
+        }
 
         // Set up a latch that signals reader start reading
         let start_latch = Arc::new(Notify::new());
@@ -89,9 +101,8 @@ impl
             // conversions.
             let mut cursor = selector.cursor.clone();
 
-            // Load the result set page-by-page
-            let mut element_counter = 0;
-            'page_loop: loop {
+            // Load page-by-page.
+            loop {
                 // Wait until page fits in buffer
                 let mut permits = sender.reserve_many(page_size).await.map_err(|err| {
                     let msg = format!("Read interrupted: {}", err.to_string());
@@ -164,14 +175,6 @@ impl
                     let permit = permits.next().expect("Permit should exist");
                     let kv_row: KeyValueRow = entry.into();
                     permit.send(kv_row);
-
-                    // Stop if we reached the requested number of records.
-                    if let Some(limit) = selector.limit {
-                        element_counter += 1;
-                        if element_counter >= limit {
-                            break 'page_loop;
-                        }
-                    }
                 }
 
                 // Stop when the server returned a response without cursor header.
@@ -232,7 +235,7 @@ impl
         })
         .boxed();
 
-        // This implementation reads all of the pages, so it always returns
+        // This implementation reads all the pages, so it always returns
         // metadata without the cursor.
         let metadata = KeyValueStorageReaderMetadata { cursor: None };
 

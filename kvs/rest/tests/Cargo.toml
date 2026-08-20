@@ -16,6 +16,7 @@ kvs-tck.workspace = true
 
 axum.workspace = true
 futures.workspace = true
+mockall.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 tracing.workspace = true
 tracing-test.workspace = true

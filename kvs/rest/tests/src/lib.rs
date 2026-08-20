@@ -1,83 +1,102 @@
-/// This module contains tests of integration between the REST client and the
-/// REST server. It focuses on the integration aspects ensuring the data
-/// transfers correctly.
+/// This module contains tests of the integration between the REST client and
+/// the REST server.
 
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
     use engine::Reader;
-    use futures::StreamExt;
-    use kvs_api::{KeyValueRow, KeyValueStorageReaderError};
     use kvs_rest_client::RestKeyValueReader;
     use kvs_rest_server::kvs_reader_router;
-    use kvs_tck::reader_utils::MockReader;
-    use tokio::net::TcpListener;
+    use kvs_tck::{
+        mock_reader::MockReader,
+        reader_assertions::{
+            assert_reads_selected_by_key, assert_reads_selected_by_name,
+            assert_reads_selected_by_namespace, assert_reads_selected_by_nnk,
+            assert_reads_unlimited, using_mock_reader,
+        },
+    };
+    use tokio::{net::TcpListener, test};
     use tracing_test::traced_test;
 
-    #[tokio::test]
+    #[test]
     #[traced_test]
-    async fn read_all() {
-        let reader = setup_client(1).await;
-
-        let (stream, _) = reader
-            .read(&|it| it.select())
-            .await
-            .expect("Reading failed");
-
-        let actual: Vec<_> = stream.collect().await;
-        let expexted = test_data();
-
-        assert_eq!(expexted, actual)
+    async fn ensure_reads_unlimited_test() {
+        using_mock_reader(async |backend| {
+            let frontend = init_frontend(backend).await;
+            assert_reads_unlimited(frontend).await;
+        })
+        .await;
     }
 
-    #[tokio::test]
+    #[test]
     #[traced_test]
-    async fn read_to_the_limit() {
-        let reader = setup_client(1).await;
-
-        let (stream, _) = reader
-            .read(&|it| it.limit(&1).select())
-            .await
-            .expect("Reading failed");
-
-        let first_row = test_data()[0].clone();
-        let expected = vec![first_row];
-        let actual: Vec<_> = stream.collect().await;
-
-        assert_eq!(expected, actual)
+    async fn ensure_reads_selected_by_namespace_test() {
+        using_mock_reader(async |backend| {
+            let frontend = init_frontend(backend).await;
+            assert_reads_selected_by_namespace(frontend).await;
+        })
+        .await;
     }
 
-    fn test_data() -> Vec<Result<KeyValueRow, KeyValueStorageReaderError>> {
-        vec![
-            Ok(KeyValueRow::new(
-                "robots",
-                "T-1000",
-                "classification",
-                "Infiltration and Assasination Unit",
-            )),
-            Ok(KeyValueRow::new(
-                "robots",
-                "T-1000",
-                "estimated_mass",
-                "140",
-            )),
-        ]
+    #[test]
+    #[traced_test]
+    async fn ensure_reads_selected_by_name_test() {
+        using_mock_reader(async |backend| {
+            let frontend = init_frontend(backend).await;
+            assert_reads_selected_by_name(frontend).await;
+        })
+        .await;
     }
 
-    async fn setup_client(page_size: usize) -> RestKeyValueReader {
-        let test_data = test_data();
-        let original_reader = Arc::new(MockReader::new(&test_data));
-        let app = kvs_reader_router(original_reader);
+    #[test]
+    #[traced_test]
+    async fn ensure_reads_selected_by_key_test() {
+        using_mock_reader(async |backend| {
+            let frontend = init_frontend(backend).await;
+            assert_reads_selected_by_key(frontend).await;
+        })
+        .await;
+    }
+
+    #[test]
+    #[traced_test]
+    async fn ensure_reads_selected_by_nnk_test() {
+        using_mock_reader(async |backend| {
+            let frontend = init_frontend(backend).await;
+            assert_reads_selected_by_nnk(frontend).await;
+        })
+        .await;
+    }
+
+    #[test]
+    #[traced_test]
+    async fn limit_is_unsupported() {
+        using_mock_reader(async |backend| {
+            let frontend = init_frontend(backend).await;
+            let result = frontend.read(&|it| it.limit(&1).select()).await;
+
+            assert!(result.is_err());
+        })
+        .await;
+    }
+
+    async fn init_frontend(backend: MockReader) -> RestKeyValueReader {
+        let backend = Arc::new(backend);
+        let kvs_reader_app = kvs_reader_router(backend.clone());
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("Failed to bind to random port");
         let addr = listener.local_addr().unwrap();
 
         tokio::spawn(async move {
-            axum::serve(listener, app).await.expect("server failed");
+            axum::serve(listener, kvs_reader_app)
+                .await
+                .expect("server failed");
         });
 
-        RestKeyValueReader::new(&format!("http://{}", addr), page_size)
+        let page_size = 2;
+        let uri = format!("http://{}", addr);
+        RestKeyValueReader::new(&uri, page_size)
     }
 }
