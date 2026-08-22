@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 # Internal
+engine.workspace = true
 kvs-api.workspace = true
 kvs-rest-common.workspace = true
 

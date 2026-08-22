@@ -9,29 +9,26 @@ use axum::{
 use axum_extra::TypedHeader;
 use base64::{engine::general_purpose, Engine};
 use csv_async::AsyncSerializer;
+use engine::ReaderStream;
 use futures::StreamExt;
 use headers_accept::Accept;
-use kvs_api::{
-    KeyValueSelectionDirectives, KeyValueSelectionTermination, KeyValueStorageReader,
-    KeyValueStorageReaderError,
-};
+use kvs_api::{KeyValueRow, KeyValueStorageReader, KeyValueStorageReaderError};
 use kvs_rest_common::{CsvKeyValueRow, Query, CURSOR_HEADER};
 use mediatype::{
     names::{APPLICATION, CSV, TEXT},
     MediaType,
 };
-use tokio::io::duplex;
-use tokio_util::io::ReaderStream;
+use tokio::io::{duplex, DuplexStream};
 use tracing::error;
 use validator::Validate;
-
-pub fn kvs_reader_router(reader: KeyValueStorageReader) -> Router {
-    Router::new().route("/", get(read)).with_state(reader)
-}
 
 const APPLICATION_CSV: MediaType = MediaType::new(APPLICATION, CSV);
 const TEXT_CSV: MediaType = MediaType::new(TEXT, CSV);
 const AVAILABLE: &[MediaType] = &[APPLICATION_CSV, TEXT_CSV];
+
+pub fn kvs_reader_router(reader: KeyValueStorageReader) -> Router {
+    Router::new().route("/", get(read)).with_state(reader)
+}
 
 #[axum::debug_handler]
 async fn read(
@@ -45,7 +42,8 @@ async fn read(
         .map(|it| it.essence())
         .map(|it| it.to_string());
 
-    match chosen_media_type.as_deref() {
+    let chosen_media_type = chosen_media_type.as_deref();
+    match chosen_media_type {
         // Send CSV by default or on demand.
         None | Some("application/csv") | Some("text/csv") => {
             // Validate query
@@ -54,35 +52,19 @@ async fn read(
                 .map_err(|err| (StatusCode::BAD_REQUEST, err.to_string()))?;
 
             // Read & handle
-            let (mut stream, metadata) =
-                reader.read(&selection_by(&query)).await.map_err(|err| {
-                    error!("Reader error {}", err);
-                    map_reader_error(err)
-                })?;
-
-            let (writer, reader) = duplex(64 * 1024);
-
-            tokio::spawn(async move {
-                let mut csv_writer = AsyncSerializer::from_writer(writer);
-                while let Some(entry) = stream.next().await {
-                    match entry {
-                        Ok(row) => {
-                            let csv_row: CsvKeyValueRow = (&row).into();
-                            let serialize_result = csv_writer.serialize(csv_row).await;
-                            if let Err(err) = serialize_result {
-                                error!("Error while serialization {}", err);
-                                break;
-                            }
-                        }
-                        Err(err) => {
-                            error!("Error while reading {}", err)
-                        }
+            let selection_fn = query.selection_fn();
+            let (stream, metadata) = reader.read(&selection_fn).await.map_err(|err| {
+                error!("Reader error {}", err);
+                match err {
+                    KeyValueStorageReaderError::UnknownError(_) => {
+                        (StatusCode::BAD_REQUEST, "Server error".to_owned())
                     }
                 }
-                let flush_result = csv_writer.flush().await;
-                if let Err(err) = flush_result {
-                    error!("Error while flushing {}", err);
-                }
+            })?;
+
+            let (writer, reader) = duplex(64 * 1024);
+            tokio::spawn(async move {
+                write_csv(stream, writer).await;
             });
 
             let mut builder = Response::builder()
@@ -90,11 +72,10 @@ async fn read(
                 .header(CONTENT_TYPE, "application/csv");
 
             if let Some(cursor) = metadata.cursor {
-                let cursor_base64 = general_purpose::URL_SAFE.encode(cursor);
-                builder = builder.header(CURSOR_HEADER, cursor_base64);
+                builder = builder.header(CURSOR_HEADER, general_purpose::URL_SAFE.encode(cursor));
             }
 
-            let binary_stream = ReaderStream::new(reader);
+            let binary_stream = tokio_util::io::ReaderStream::new(reader);
             Ok(builder.body(Body::from_stream(binary_stream)).unwrap())
         }
 
@@ -103,39 +84,25 @@ async fn read(
     }
 }
 
-fn selection_by(
-    query: &Query,
-) -> impl Fn(KeyValueSelectionDirectives) -> KeyValueSelectionTermination {
-    |it| {
-        let mut directives = it;
-        if let Some(namespace) = query.namespace.as_ref() {
-            directives = directives.namespace(namespace.as_str());
+async fn write_csv(
+    mut source: ReaderStream<Result<KeyValueRow, KeyValueStorageReaderError>>,
+    sink: DuplexStream,
+) {
+    let mut csv_writer = AsyncSerializer::from_writer(sink);
+    while let Some(entry) = source.next().await.as_ref() {
+        match entry {
+            Ok(row) => {
+                let csv_row: CsvKeyValueRow = row.into();
+                let serialization_result = csv_writer.serialize(csv_row).await;
+                if let Err(err) = serialization_result {
+                    error!("Error while serialization {}", err);
+                    break;
+                }
+            }
+            Err(err) => error!("Error while reading {}", err),
         }
-
-        if let Some(name) = query.name.as_ref() {
-            directives = directives.name(name.as_str());
-        }
-
-        if let Some(key) = query.key.as_ref() {
-            directives = directives.key(key.as_str());
-        }
-
-        if let Some(limit) = query.limit.as_ref() {
-            directives = directives.limit(limit);
-        }
-
-        if let Some(cursor) = query.cursor.as_ref() {
-            directives = directives.cursor(cursor);
-        }
-
-        directives.select()
     }
-}
-
-fn map_reader_error(err: KeyValueStorageReaderError) -> (StatusCode, String) {
-    match err {
-        KeyValueStorageReaderError::UnknownError(_) => {
-            (StatusCode::BAD_REQUEST, "Server error".to_owned())
-        }
+    if let Err(err) = csv_writer.flush().await {
+        error!("Error while flushing {}", err);
     }
 }

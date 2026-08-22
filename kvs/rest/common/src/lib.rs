@@ -1,5 +1,5 @@
 use base64::{engine::general_purpose, Engine};
-use kvs_api::{Cursor, KeyValueRow, KeyValueSelectionTermination};
+use kvs_api::{Cursor, KeyValueRow, KeyValueSelectionDirectives, KeyValueSelectionTermination};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use validator::Validate;
 
@@ -67,6 +67,35 @@ impl Query {
     pub fn cursor(mut self, cursor: &Cursor) -> Self {
         self.cursor = Some(cursor.to_owned());
         self
+    }
+
+    pub fn selection_fn(
+        &self,
+    ) -> impl Fn(KeyValueSelectionDirectives) -> KeyValueSelectionTermination {
+        |it| {
+            let mut directives = it;
+            if let Some(namespace) = self.namespace.as_ref() {
+                directives = directives.namespace(namespace.as_str());
+            }
+
+            if let Some(name) = self.name.as_ref() {
+                directives = directives.name(name.as_str());
+            }
+
+            if let Some(key) = self.key.as_ref() {
+                directives = directives.key(key.as_str());
+            }
+
+            if let Some(limit) = self.limit.as_ref() {
+                directives = directives.limit(limit);
+            }
+
+            if let Some(cursor) = self.cursor.as_ref() {
+                directives = directives.cursor(cursor);
+            }
+
+            directives.select()
+        }
     }
 }
 
